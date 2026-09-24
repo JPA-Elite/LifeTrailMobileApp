@@ -44,6 +44,7 @@ class GameState extends ChangeNotifier {
     this.weather = weather;
     this.chapter = chapter;
     _loaded = true;
+    _checkQuestUnlocks();
     notifyListeners();
   }
 
@@ -65,7 +66,37 @@ class GameState extends ChangeNotifier {
 
   void advanceMinutes(int minutes) {
     time = time.addMinutes(minutes);
+    // Summertime Saga: time advance may unlock new quests/events
+    _checkQuestUnlocks();
     notifyListeners();
+  }
+
+  // Summertime Saga chapter debt/progression hook
+  int get debtDueDay => 7;
+  bool get isDebtOverdue =>
+      time.day > debtDueDay && (flags['debt_paid'] ?? 0) == 0;
+
+  /// Promotes every `locked` quest whose gates (flags / relationship /
+  /// day / stats) are now satisfied to `available`.
+  ///
+  /// Silent on purpose: every caller notifies listeners itself.
+  void _checkQuestUnlocks() {
+    for (final entry in quests.entries.toList()) {
+      final q = entry.value;
+      if (q.status != QuestStatus.locked) continue;
+      final npcRel = npcs[q.npcId]?.relationship ?? 0;
+      if (q.canUnlock(
+        flags: flags,
+        quests: quests,
+        relationship: npcRel,
+        day: time.day,
+        intelligence: player.intelligence,
+        charm: player.charm,
+        strength: player.strength,
+      )) {
+        quests[entry.key] = q.copyWith(status: QuestStatus.available);
+      }
+    }
   }
 
   MoneyResult addMoney(int amount) {
@@ -87,7 +118,35 @@ class GameState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void addCharm(int delta) {
+    player = player.copyWith(charm: player.charm + delta);
+    _checkQuestUnlocks();
+    notifyListeners();
+  }
+
+  void addIntelligence(int delta) {
+    player = player.copyWith(intelligence: player.intelligence + delta);
+    _checkQuestUnlocks();
+    notifyListeners();
+  }
+
+  void addStrength(int delta) {
+    player = player.copyWith(strength: player.strength + delta);
+    _checkQuestUnlocks();
+    notifyListeners();
+  }
+
   bool get isExhausted => player.energy < 10;
+
+  // Returns false if blocked (energy/time/closed), like Summertime Saga's "You are too tired" / "Closed"
+  bool canDoActivity(String activityId) {
+    final cfg = Activities.of(activityId);
+    if (!EnergySystem.canDo(player.energy, cfg.energyDelta) &&
+        cfg.energyDelta < 0) {
+      return false;
+    }
+    return true;
+  }
 
   void applyActivity(String activityId) {
     final cfg = Activities.of(activityId);
@@ -100,18 +159,38 @@ class GameState extends ChangeNotifier {
       energy: player.energy + cfg.energyDelta,
       happiness: player.happiness + cfg.happinessDelta,
       health: player.health + cfg.healthDelta,
+      intelligence: player.intelligence + cfg.intelligenceDelta,
+      strength: player.strength + cfg.strengthDelta,
+      charm: player.charm + cfg.charmDelta,
+      education: player.education + cfg.educationDelta,
     );
+    // Stat gains from activities can satisfy a quest gate (e.g. park gym
+    // raising Strength to 14 unlocks the Gym Initiation quest).
+    _checkQuestUnlocks();
     notifyListeners();
   }
+
+  // Location-gated variant: respects opening hours (Summertime Saga)
+  bool isLocationOpen(String locationId) =>
+      LocationHours.isOpen(locationId, time.weekdayLabel, time.minutes);
 
   void eatMeal() => applyActivity('eat');
 
   void study() {
+    if (!canDoActivity('study')) return;
     applyActivity('study');
-    player = player.copyWith(
-      education: player.education + 2,
-      intelligence: player.intelligence + 1,
-    );
+    notifyListeners();
+  }
+
+  void exercise() {
+    if (!canDoActivity('exercise')) return;
+    applyActivity('exercise');
+    notifyListeners();
+  }
+
+  void socialize() {
+    if (!canDoActivity('socialize')) return;
+    applyActivity('socialize');
     notifyListeners();
   }
 
@@ -137,11 +216,13 @@ class GameState extends ChangeNotifier {
     final npc = npcs[npcId];
     if (npc == null) return;
     npcs[npcId] = npc.copyWith(relationship: npc.relationship + delta);
+    _checkQuestUnlocks();
     notifyListeners();
   }
 
   void setFlag(String key, [int value = 1]) {
     flags[key] = value;
+    _checkQuestUnlocks();
     notifyListeners();
   }
 
@@ -208,6 +289,11 @@ class GameState extends ChangeNotifier {
       health: player.health + 5,
     );
     weather = WeatherKind.sunny;
+    // Summertime Saga: chapter increments, attendance resets weekly
+    if (wake.weekday == Weekday.monday) {
+      flags['weekly_attendance_checked'] = 0;
+    }
+    _checkQuestUnlocks();
     notifyListeners();
   }
 

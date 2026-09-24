@@ -22,6 +22,12 @@ class ActionButtons extends StatelessWidget {
       right: 12,
       bottom: 12,
       child: SafeArea(
+        // Bottom inset only so left/right gutters stay symmetric
+        // (matching the joystick's 12px) on cutout phones.
+        top: false,
+        left: false,
+        right: false,
+        bottom: true,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -42,7 +48,7 @@ class ActionButtons extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _roundBtn(
-                    icon: running ? Icons.directions_run : Icons.directions_walk,
+                  icon: running ? Icons.directions_run : Icons.directions_walk,
                   label: 'RUN',
                   active: running,
                   onTap: () => onRunChanged(!running),

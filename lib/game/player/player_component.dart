@@ -1,33 +1,88 @@
+import 'dart:math' as math;
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
+import 'stick_figure.dart';
 
+/// The player: an articulated stick figure with a walk / run cycle.
 class PlayerComponent extends PositionComponent {
   Vector2 moveInput = Vector2.zero();
   bool running = false;
   final double walkSpeed = 220;
   final double runSpeed = 360;
 
+  static const double kWidth = 44;
+  static const double kHeight = 96;
+
+  /// Render above the scene. Without this the player is drawn *before* a
+  /// freshly loaded room's floor and walls (they are added later), which made
+  /// the stickman vanish whenever a building was entered.
+  static const int renderPriority = 100;
+
+  /// Position at the start of the current frame, used to resolve collisions
+  /// without snapping or shaking.
+  final Vector2 previousPosition = Vector2.zero();
+
+  /// +1 faces right, -1 faces left.
+  double _facing = 1;
+
+  /// Walk cycle phase, in radians.
+  double _phase = 0;
+
+  /// Idle breathing phase.
+  double _idle = 0;
+
+  /// How much of the walk pose to apply: 0 = standing, 1 = full stride.
+  double _stride = 0;
+
   PlayerComponent({required Vector2 spawn})
-    : super(position: spawn, size: Vector2(48, 48), anchor: Anchor.center);
+    : super(
+        position: spawn,
+        size: Vector2(kWidth, kHeight),
+        anchor: Anchor.bottomCenter,
+        priority: renderPriority,
+      ) {
+    previousPosition.setFrom(spawn);
+  }
 
   double get speed => running ? runSpeed : walkSpeed;
 
+  bool get isMoving => moveInput.length > 0.01;
+
+  /// Small box around the feet: what collides with the world and interacts.
+  Rect get feetRect => Rect.fromLTWH(position.x - 18, position.y - 18, 36, 20);
+
   @override
   void update(double dt) {
-    if (moveInput.length > 0.01) {
-      final dir = moveInput.normalized();
-      position += dir * speed * dt;
-      position.x = position.x.clamp(24, 3200 - 24);
-      position.y = position.y.clamp(24, 1800 - 24);
+    previousPosition.setFrom(position);
+
+    if (isMoving) {
+      final direction = moveInput.normalized();
+      position += direction * speed * dt;
+      if (direction.x.abs() > 0.15) {
+        _facing = direction.x >= 0 ? 1 : -1;
+      }
+      // Faster cadence while running.
+      _phase += dt * (running ? 13.5 : 9.0);
     }
+
+    final target = isMoving ? 1.0 : 0.0;
+    _stride += (target - _stride) * math.min(1.0, dt * 12);
+    _idle += dt * 2.2;
+
     super.update(dt);
   }
 
   @override
   void render(Canvas canvas) {
-    final body = Paint()..color = const Color(0xFFE06666);
-    canvas.drawCircle(const Offset(24, 24), 20, body);
-    final face = Paint()..color = Colors.white;
-    canvas.drawCircle(const Offset(24, 20), 8, face);
+    drawStickFigure(
+      canvas,
+      width: size.x,
+      height: size.y,
+      phase: _phase,
+      stride: _stride,
+      facing: _facing,
+      idle: _idle,
+      running: running,
+    );
   }
 }

@@ -8,6 +8,7 @@ class PlayerModel {
   final int happiness;
   final int intelligence;
   final int strength;
+  final int charm;
   final int education;
   final int money;
   final String locationId;
@@ -20,6 +21,7 @@ class PlayerModel {
     this.happiness = 72,
     this.intelligence = 10,
     this.strength = 10,
+    this.charm = 10,
     this.education = 10,
     this.money = 500,
     this.locationId = 'home',
@@ -30,12 +32,16 @@ class PlayerModel {
   double get attendanceRate =>
       attendanceTaken == 0 ? 1.0 : attendancePresent / attendanceTaken;
 
+  // Summertime Saga style stat summary for HUD/checks
+  String get statSummary => 'Int $intelligence · Str $strength · Chm $charm';
+
   PlayerModel copyWith({
     int? health,
     int? energy,
     int? happiness,
     int? intelligence,
     int? strength,
+    int? charm,
     int? education,
     int? money,
     String? locationId,
@@ -48,6 +54,7 @@ class PlayerModel {
       happiness: (happiness ?? this.happiness).clamp(0, happinessMax),
       intelligence: (intelligence ?? this.intelligence).clamp(0, 999),
       strength: (strength ?? this.strength).clamp(0, 999),
+      charm: (charm ?? this.charm).clamp(0, 999),
       education: (education ?? this.education).clamp(0, 999),
       money: (money ?? this.money).clamp(0, 9999999),
       locationId: locationId ?? this.locationId,
@@ -62,6 +69,7 @@ class PlayerModel {
     'happiness': happiness,
     'intelligence': intelligence,
     'strength': strength,
+    'charm': charm,
     'education': education,
     'money': money,
     'locationId': locationId,
@@ -75,6 +83,7 @@ class PlayerModel {
     happiness: (json['happiness'] as num?)?.toInt() ?? 72,
     intelligence: (json['intelligence'] as num?)?.toInt() ?? 10,
     strength: (json['strength'] as num?)?.toInt() ?? 10,
+    charm: (json['charm'] as num?)?.toInt() ?? 10,
     education: (json['education'] as num?)?.toInt() ?? 10,
     money: (json['money'] as num?)?.toInt() ?? 500,
     locationId: json['locationId'] as String? ?? 'home',

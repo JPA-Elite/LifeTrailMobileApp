@@ -15,6 +15,43 @@
         {"id": "talk_vendor", "description": "Ask the vendor about the wallet"},
         {"id": "return_wallet", "description": "Return the wallet to Maria"}
       ]
+    },
+    {
+      "id": "alex_confide",
+      "title": "Alex's Secret",
+      "description": "Alex will open up once you gain his trust and prove you're charming/smart.",
+      "npcId": "alex",
+      "rewardMoney": 0,
+      "rewardRelationship": 8,
+      "rewardFlag": "alex_confided",
+      "status": "locked",
+      "requiresFlags": ["met_alex"],
+      "requiresRelationship": 10,
+      "requiresCharm": 12,
+      "requiresIntelligence": 12,
+      "objectives": [
+        {"id": "talk_alex_plaza", "description": "Talk to Alex at the plaza after school (15:30-18:00)"},
+        {"id": "charm_check", "description": "Impress Alex with your charm"},
+        {"id": "earn_trust", "description": "Return when Alex trusts you"}
+      ]
+    },
+    {
+      "id": "gym_initiation",
+      "title": "Gym Initiation",
+      "description": "Ben respects strength. Train at the park gym to earn his respect.",
+      "npcId": "ben",
+      "rewardMoney": 150,
+      "rewardRelationship": 6,
+      "rewardFlag": "ben_respects_you",
+      "status": "locked",
+      "requiresDay": 2,
+      "requiresStrength": 14,
+      "requiresFlags": ["met_ben"],
+      "objectives": [
+        {"id": "train_strength", "description": "Reach Strength 14 at park gym"},
+        {"id": "talk_ben_work", "description": "Talk to Ben at the café after 17:00"},
+        {"id": "spar_ben", "description": "Spar with Ben at the park"}
+      ]
     }
   ]
 }

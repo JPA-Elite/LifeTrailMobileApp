@@ -1,13 +1,15 @@
 {
   "nodes": [
     {"id": "start", "speaker": "Alex", "text": "Hey! Are you going to the plaza later?", "choices": [
-      {"text": "Sure, see you there!", "next": "happy", "effects": {"relationship": 3}},
+      {"text": "Sure, see you there! (Charm 12 required)", "next": "happy", "effects": {"relationship": 3}, "requiresCharm": 12},
       {"text": "Maybe, I have school stuff.", "next": "neutral"},
-      {"text": "Not today.", "next": "bye", "effects": {"relationship": -1}}
+      {"text": "Not today.", "next": "bye", "effects": {"relationship": -1}},
+      {"text": "[Confide] You seemed down yesterday...", "next": "confide", "effects": {"relationship": 4}, "requiresRelationship": 10, "requiresFlag": "alex_confided_check"}
     ]},
-    {"id": "happy", "speaker": "Alex", "text": "Great! The plaza is lively after school.", "next": "end"},
+    {"id": "happy", "speaker": "Alex", "text": "Great! The plaza is lively after school. Let's train charm together next time!", "next": "end"},
     {"id": "neutral", "speaker": "Alex", "text": "No worries. Study hard!", "next": "end"},
     {"id": "bye", "speaker": "Alex", "text": "Okay, catch you another time.", "next": "end"},
+    {"id": "confide", "speaker": "Alex", "text": "Thanks for noticing... I've been stressed about the exams. You get it.", "choices": [], "requiresRelationship": 10},
     {"id": "end", "speaker": "Alex", "text": "See you around!", "choices": []}
   ]
 }

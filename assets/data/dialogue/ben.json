@@ -1,10 +1,12 @@
 {
   "nodes": [
-    {"id": "start", "speaker": "Ben", "text": "Hey. The café is hiring after school if you need work.", "choices": [
+    {"id": "start", "speaker": "Ben", "text": "Hey. The café is hiring after school if you need work. You look like you could use training.", "choices": [
       {"text": "How do I apply?", "next": "job"},
-      {"text": "Maybe later.", "next": "bye"}
+      {"text": "Maybe later.", "next": "bye"},
+      {"text": "[Strong] I can handle hard work! (Str 14)", "next": "strong", "effects": {"relationship": 3}, "requiresStrength": 14}
     ]},
     {"id": "job", "speaker": "Ben", "text": "Just visit the café between 17:00 and 20:00 and start a shift.", "choices": []},
+    {"id": "strong", "speaker": "Ben", "text": "Nice! Come spar at the park when you're ready.", "choices": [], "requiresStrength": 14},
     {"id": "bye", "speaker": "Ben", "text": "Sure. Good luck with school.", "choices": []}
   ]
 }
