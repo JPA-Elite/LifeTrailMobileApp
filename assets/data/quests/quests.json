@@ -1,0 +1,20 @@
+{
+  "quests": [
+    {
+      "id": "missing_wallet",
+      "title": "Missing Wallet",
+      "description": "Maria lost her wallet at the plaza. Help her find it.",
+      "npcId": "maria",
+      "rewardMoney": 200,
+      "rewardRelationship": 5,
+      "rewardFlag": "completed_wallet_quest",
+      "status": "available",
+      "objectives": [
+        {"id": "talk_maria", "description": "Talk to Maria at the plaza"},
+        {"id": "search_plaza", "description": "Search the plaza benches"},
+        {"id": "talk_vendor", "description": "Ask the vendor about the wallet"},
+        {"id": "return_wallet", "description": "Return the wallet to Maria"}
+      ]
+    }
+  ]
+}

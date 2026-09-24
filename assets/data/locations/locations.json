@@ -1,0 +1,10 @@
+{
+  "locations": [
+    {"id": "home", "name": "Home", "x": 1400, "y": 1180, "w": 400, "h": 260, "color": 4293519789},
+    {"id": "school", "name": "School", "x": 1400, "y": 120, "w": 400, "h": 260, "color": 4285605852},
+    {"id": "plaza", "name": "Plaza", "x": 1400, "y": 700, "w": 400, "h": 300, "color": 4287874933},
+    {"id": "church", "name": "Church", "x": 120, "y": 700, "w": 340, "h": 240, "color": 4292140777},
+    {"id": "park", "name": "Park", "x": 2280, "y": 700, "w": 340, "h": 240, "color": 4285637455},
+    {"id": "workplace", "name": "Cafe", "x": 1400, "y": 1560, "w": 400, "h": 200, "color": 4294959014}
+  ]
+}

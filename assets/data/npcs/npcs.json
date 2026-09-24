@@ -1,0 +1,47 @@
+{
+  "npcs": [
+    {
+      "id": "alex",
+      "name": "Alex",
+      "age": 16,
+      "personality": "cheerful",
+      "dialogueId": "alex",
+      "questIds": [],
+      "schedule": [
+        {"weekday": "monday", "start": "08:00", "end": "15:30", "location": "school"},
+        {"weekday": "monday", "start": "15:30", "end": "18:00", "location": "plaza"},
+        {"weekday": "monday", "start": "18:00", "end": "20:00", "location": "park"},
+        {"weekday": "any", "start": "08:00", "end": "15:30", "location": "school"},
+        {"weekday": "any", "start": "15:30", "end": "18:00", "location": "plaza"},
+        {"weekday": "saturday", "start": "10:00", "end": "17:00", "location": "plaza"},
+        {"weekday": "sunday", "start": "10:00", "end": "12:00", "location": "church"}
+      ]
+    },
+    {
+      "id": "maria",
+      "name": "Maria",
+      "age": 17,
+      "personality": "kind",
+      "dialogueId": "maria",
+      "questIds": ["missing_wallet"],
+      "schedule": [
+        {"weekday": "any", "start": "07:00", "end": "12:00", "location": "plaza"},
+        {"weekday": "any", "start": "12:00", "end": "15:00", "location": "park"},
+        {"weekday": "any", "start": "15:00", "end": "19:00", "location": "plaza"}
+      ]
+    },
+    {
+      "id": "ben",
+      "name": "Ben",
+      "age": 18,
+      "personality": "calm",
+      "dialogueId": "ben",
+      "questIds": [],
+      "schedule": [
+        {"weekday": "any", "start": "09:00", "end": "15:00", "location": "school"},
+        {"weekday": "any", "start": "17:00", "end": "20:00", "location": "workplace"},
+        {"weekday": "sunday", "start": "10:00", "end": "12:00", "location": "church"}
+      ]
+    }
+  ]
+}

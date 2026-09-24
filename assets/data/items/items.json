@@ -1,0 +1,10 @@
+{
+  "items": [
+    {"id": "bread", "name": "Bread", "description": "Fresh bread. Restores a little energy.", "category": "food", "price": 25, "effects": {"energy": 10}},
+    {"id": "water", "name": "Water", "description": "Cool water.", "category": "drink", "price": 10, "effects": {"energy": 5}},
+    {"id": "chocolate", "name": "Chocolate", "description": "Sweet treat. Makes you happy.", "category": "food", "price": 40, "effects": {"happiness": 8, "energy": 4}},
+    {"id": "notebook", "name": "Notebook", "description": "Useful for school.", "category": "school", "price": 60, "effects": {"education": 2}},
+    {"id": "medicine", "name": "Medicine", "description": "Restores health.", "category": "misc", "price": 120, "effects": {"health": 20}},
+    {"id": "wallet_maria", "name": "Maria's Wallet", "description": "Quest item. Return it to Maria.", "category": "quest", "price": 0, "stackable": false}
+  ]
+}

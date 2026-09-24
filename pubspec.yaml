@@ -1,0 +1,31 @@
+name: lifetrail
+description: "Life Trail Mobile — original 2D landscape life-simulation game."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flame: ^1.22.0
+  flutter_riverpod: ^2.6.1
+  shared_preferences: ^2.3.3
+  cupertino_icons: ^1.0.8
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/data/npcs/
+    - assets/data/quests/
+    - assets/data/items/
+    - assets/data/dialogue/
+    - assets/data/locations/
+    - assets/data/school/

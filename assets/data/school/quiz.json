@@ -1,0 +1,15 @@
+{
+  "subjects": {
+    "mathematics": [
+      {"q": "12 x 8 = ?", "choices": ["86", "96", "108", "112"], "answer": 1},
+      {"q": "15 + 27 = ?", "choices": ["32", "42", "52", "41"], "answer": 1},
+      {"q": "100 / 4 = ?", "choices": ["20", "25", "30", "15"], "answer": 1}
+    ],
+    "english": [
+      {"q": "Choose the correct sentence.", "choices": ["She go to school.", "She goes to school.", "She going to school.", "She gone to school."], "answer": 1}
+    ],
+    "science": [
+      {"q": "Water boils at?", "choices": ["90C", "100C", "110C", "80C"], "answer": 1}
+    ]
+  }
+}

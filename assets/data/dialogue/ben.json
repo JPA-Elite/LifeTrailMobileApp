@@ -1,0 +1,10 @@
+{
+  "nodes": [
+    {"id": "start", "speaker": "Ben", "text": "Hey. The café is hiring after school if you need work.", "choices": [
+      {"text": "How do I apply?", "next": "job"},
+      {"text": "Maybe later.", "next": "bye"}
+    ]},
+    {"id": "job", "speaker": "Ben", "text": "Just visit the café between 17:00 and 20:00 and start a shift.", "choices": []},
+    {"id": "bye", "speaker": "Ben", "text": "Sure. Good luck with school.", "choices": []}
+  ]
+}

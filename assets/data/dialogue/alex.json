@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {"id": "start", "speaker": "Alex", "text": "Hey! Are you going to the plaza later?", "choices": [
+      {"text": "Sure, see you there!", "next": "happy", "effects": {"relationship": 3}},
+      {"text": "Maybe, I have school stuff.", "next": "neutral"},
+      {"text": "Not today.", "next": "bye", "effects": {"relationship": -1}}
+    ]},
+    {"id": "happy", "speaker": "Alex", "text": "Great! The plaza is lively after school.", "next": "end"},
+    {"id": "neutral", "speaker": "Alex", "text": "No worries. Study hard!", "next": "end"},
+    {"id": "bye", "speaker": "Alex", "text": "Okay, catch you another time.", "next": "end"},
+    {"id": "end", "speaker": "Alex", "text": "See you around!", "choices": []}
+  ]
+}

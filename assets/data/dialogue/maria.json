@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {"id": "start", "speaker": "Maria", "text": "Oh no... I lost my wallet at the plaza! Can you help me?", "choices": [
+      {"text": "Of course, I'll help!", "next": "quest", "effects": {"relationship": 2}, "setFlag": "met_maria"},
+      {"text": "What does it look like?", "next": "desc"},
+      {"text": "Sorry, I'm busy.", "next": "bye", "effects": {"relationship": -1}}
+    ]},
+    {"id": "desc", "speaker": "Maria", "text": "It's a small brown wallet. I was sitting near the benches.", "next": "quest"},
+    {"id": "quest", "speaker": "Maria", "text": "Thank you! Check the plaza benches, then ask the vendor.", "choices": []},
+    {"id": "bye", "speaker": "Maria", "text": "Oh... okay. Let me know if you change your mind.", "choices": []}
+  ]
+}
