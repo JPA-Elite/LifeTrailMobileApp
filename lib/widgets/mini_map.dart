@@ -128,22 +128,23 @@ class MiniMapPainter extends CustomPainter {
     }
 
     // The player: a ring plus a dot, drawn at a constant on-screen size.
+    // Kept small so it doesn't cover nearby buildings/doors.
     canvas.drawCircle(
       Offset(position.x, position.y),
-      34 / scale,
+      12 / scale,
       Paint()..color = const Color(0x66FFFFFF),
     );
     canvas.drawCircle(
       Offset(position.x, position.y),
-      18 / scale,
+      6 / scale,
       Paint()..color = const Color(0xFFFF3B30),
     );
     canvas.drawCircle(
       Offset(position.x, position.y),
-      18 / scale,
+      6 / scale,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 5 / scale
+        ..strokeWidth = 2 / scale
         ..color = Colors.white,
     );
 

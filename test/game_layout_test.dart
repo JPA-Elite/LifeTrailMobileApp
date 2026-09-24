@@ -56,14 +56,14 @@ void main() {
 
     expect(clock.height, vitals.height);
     expect(skills.height, clock.height);
-    // Cards stay edge-to-edge with symmetric 10px gutters and 8px gaps.
+    // Cards stay edge-to-edge with symmetric 8px gutters and 6px gaps.
     expect(
-      clock.width + vitals.width + skills.width + 8 + 8 + 20,
+      clock.width + vitals.width + skills.width + 6 + 6 + 16,
       kScreenWidth,
     );
   });
 
-  testWidgets('Dialogue box spans the full screen width', (tester) async {
+  testWidgets('Dialogue box is 90% of the screen width', (tester) async {
     useLandscapePhone(tester);
     await tester.pumpWidget(
       MaterialApp(
@@ -88,9 +88,16 @@ void main() {
       ),
     );
 
-    final box = tester.getSize(find.byType(DialogueBox));
-    expect(box.width, kScreenWidth);
-    // Sits flush with the bottom edge (full-bleed panel).
+    final box = tester.getSize(
+      find
+          .descendant(
+            of: find.byType(DialogueBox),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(box.width, kScreenWidth * 0.9);
+    // Floats above the bottom edge (centered card, not full-bleed).
     expect(tester.getBottomLeft(find.byType(DialogueBox)).dy, kScreenHeight);
   });
 }

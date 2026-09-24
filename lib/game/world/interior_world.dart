@@ -120,7 +120,21 @@ class ExitDoor extends PositionComponent implements Interactable {
   String get interactLabel => 'Leave ${layout.title}';
 
   @override
+  bool get isSeat => false;
+
+  @override
   Vector2 get interactPosition => position;
+
+  /// Body contact: the doorway's own box, extended onto the room side
+  /// so the entry spawn (96px inside the door) still targets it.
+  @override
+  Rect get touchRect => toRect().expandToInclude(
+    Rect.fromCenter(
+      center: Offset(position.x, position.y - 100),
+      width: size.x,
+      height: 200,
+    ),
+  );
 
   @override
   Future<void> onInteract(LifeInteractContext ctx) => ctx.exitLocation();
@@ -143,6 +157,8 @@ class ExitDoor extends PositionComponent implements Interactable {
 }
 
 /// A furniture item the player can examine, or that opens the location menu.
+/// Chairs, benches, pews and sofas are sittable: they call `sitDown` so the
+/// player rests and recovers energy.
 class InteriorPropBlock extends RectangleComponent implements Interactable {
   final InteriorProp prop;
   final String locationId;
@@ -154,19 +170,50 @@ class InteriorPropBlock extends RectangleComponent implements Interactable {
         paint: Paint()..color = Color(prop.color),
       );
 
+  /// Labels that count as seats (case-insensitive substring match).
+  static const _seatHints = ['bench', 'pew', 'chair', 'sofa', 'stool', 'couch'];
+
+  bool get _sittable =>
+      (prop.sit ?? false) ||
+      _seatHints.any(
+        (h) =>
+            (prop.label ?? '').toLowerCase().contains(h) ||
+            (prop.interactLabel ?? '').toLowerCase().contains(h),
+      );
+
+  @override
+  bool get isSeat => _sittable;
+
   @override
   String get interactId =>
       'prop_${locationId}_${prop.x.toInt()}_${prop.y.toInt()}';
 
   @override
-  String get interactLabel =>
-      prop.interactLabel ?? (prop.opensMenu ? 'Open menu' : 'Look around');
+  String get interactLabel {
+    if (_sittable) {
+      final what = (prop.label ?? '').isNotEmpty
+          ? prop.label!.toLowerCase()
+          : 'seat';
+      return 'Sit on the $what';
+    }
+    return prop.interactLabel ?? (prop.opensMenu ? 'Open menu' : 'Look around');
+  }
 
   @override
   Vector2 get interactPosition => center;
 
+  /// Body contact: the furniture's box plus a small margin, so standing right
+  /// against a bench / pew / sofa counts as touching it. Collision stops the
+  /// feet just outside the solid, which is what the margin covers.
+  @override
+  Rect get touchRect => toRect().inflate(24);
+
   @override
   Future<void> onInteract(LifeInteractContext ctx) async {
+    if (_sittable) {
+      ctx.sitDown();
+      return;
+    }
     if (prop.opensMenu) {
       ctx.openLocationMenu(locationId);
       return;

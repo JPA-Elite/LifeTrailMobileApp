@@ -20,6 +20,10 @@ class InteriorProp {
   /// showing [message].
   final bool opensMenu;
 
+  /// When true, interacting makes the player sit and rest (+energy).
+  /// Benches/pews/sofas/chairs are auto-detected even without this flag.
+  final bool? sit;
+
   const InteriorProp({
     required this.x,
     required this.y,
@@ -30,6 +34,7 @@ class InteriorProp {
     this.interactLabel,
     this.message,
     this.opensMenu = false,
+    this.sit,
   });
 }
 

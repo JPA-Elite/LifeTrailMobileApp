@@ -295,7 +295,10 @@ class TownBackdrop extends PositionComponent {
 /// A physical piece of street dressing: trees, benches, lamps and hydrants.
 /// Only the small footprint at its base blocks movement, so the player can
 /// walk under a tree canopy or past a bench top.
-class StreetProp extends PositionComponent {
+///
+/// Only benches surface an action button ("Sit on the bench"); trees, lamps
+/// and hydrants are scenery and are filtered out of the interact scan.
+class StreetProp extends PositionComponent implements Interactable {
   final TownDecoration decoration;
 
   StreetProp({required this.decoration})
@@ -385,6 +388,43 @@ class StreetProp extends PositionComponent {
         break;
     }
   }
+
+  bool get _sittable => decoration.kind == 'bench';
+
+  /// Only benches count as interactable: trees / lamps / hydrants return an
+  /// empty anchor/label so the interact scan skips them entirely.
+  bool get isInteractable => _sittable;
+
+  @override
+  String get interactId =>
+      'prop_${decoration.kind}_${decoration.x.toInt()}_${decoration.y.toInt()}';
+
+  @override
+  String get interactLabel => 'Sit on the bench';
+
+  @override
+  bool get isSeat => _sittable;
+
+  @override
+  Vector2 get interactPosition => Vector2(
+    decoration.x,
+    decoration.y,
+  );
+
+  /// Body contact: the bench's footprint plus a small margin (the player's
+  /// feet box is stopped just outside the solid by collision, so the margin
+  /// is what makes "standing right at the bench" count as touching it).
+  @override
+  Rect get touchRect => toRect().inflate(24);
+
+  @override
+  Future<void> onInteract(LifeInteractContext ctx) async {
+    if (_sittable) {
+      ctx.sitDown();
+      return;
+    }
+    ctx.showMessage('Nothing interesting here.');
+  }
 }
 
 class BuildingBlock extends RectangleComponent implements Interactable {
@@ -393,6 +433,9 @@ class BuildingBlock extends RectangleComponent implements Interactable {
   final String interactId;
   @override
   final String interactLabel;
+
+  @override
+  bool get isSeat => false;
 
   static const double doorWidth = 96;
   static const double doorHeight = 26;
@@ -417,6 +460,16 @@ class BuildingBlock extends RectangleComponent implements Interactable {
 
   @override
   Vector2 get interactPosition => doorPosition;
+
+  /// Body contact: the doorway zone on the street side of the door.
+  /// Tall enough (140px) to include the doorSpawn point 56px in front of
+  /// the door, so standing in front of the door targets it.
+  @override
+  Rect get touchRect => Rect.fromCenter(
+    center: Offset(doorPosition.x, doorPosition.y),
+    width: 140,
+    height: 140,
+  );
 
   @override
   Future<void> onInteract(LifeInteractContext ctx) async {
@@ -491,7 +544,17 @@ class NpcMarker extends PositionComponent implements Interactable {
   @override
   String get interactLabel => 'Talk to $npcName';
   @override
+  bool get isSeat => false;
+  @override
   Vector2 get interactPosition => position;
+
+  /// Body contact: the marker's own 56px circle.
+  @override
+  Rect get touchRect => Rect.fromCenter(
+    center: Offset(position.x, position.y),
+    width: 72,
+    height: 72,
+  );
 
   NpcMarker({required this.npcId, required this.npcName, required Vector2 at})
     : super(

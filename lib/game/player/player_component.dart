@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
+import '../world/feet_collision.dart';
 import 'stick_figure.dart';
 
 /// The player: an articulated stick figure with a walk / run cycle.
@@ -49,7 +50,14 @@ class PlayerComponent extends PositionComponent {
   bool get isMoving => moveInput.length > 0.01;
 
   /// Small box around the feet: what collides with the world and interacts.
-  Rect get feetRect => Rect.fromLTWH(position.x - 18, position.y - 18, 36, 20);
+  ///
+  /// Shares [FeetBody] with `resolveFeetCollision`, so the box used to detect
+  /// touch (benches, doors, furniture) is exactly the box the world blocks
+  /// with. They used to differ by 18px vertically, which left a gap no
+  /// interact zone could ever reach — the bench "Sit" button never appeared.
+  static const FeetBody feetBody = FeetBody();
+
+  Rect get feetRect => feetBody.rectAt(position);
 
   @override
   void update(double dt) {

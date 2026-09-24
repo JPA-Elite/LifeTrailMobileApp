@@ -23,7 +23,7 @@ class GameHud extends ConsumerWidget {
         left: false,
         right: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: IntrinsicHeight(
             // Stretch + intrinsic height so all three cards are exactly
             // as tall as the tallest one. Previously the short left card
@@ -36,9 +36,9 @@ class GameHud extends ConsumerWidget {
                 // thirds: the sparse clock/money card needs the least
                 // room and the stats card the most.
                 Expanded(flex: 3, child: _clockCard(state)),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Expanded(flex: 3, child: _vitalsCard(state)),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Expanded(flex: 4, child: _skillsCard(state)),
               ],
             ),
@@ -50,10 +50,10 @@ class GameHud extends ConsumerWidget {
 
   Widget _cardShell({required Color color, required Widget child}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: child,
     );
@@ -72,7 +72,7 @@ class GameHud extends ConsumerWidget {
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
-              fontSize: 13,
+              fontSize: 11,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -82,7 +82,7 @@ class GameHud extends ConsumerWidget {
             style: const TextStyle(
               color: Color(0xFFFFD966),
               fontWeight: FontWeight.bold,
-              fontSize: 14,
+              fontSize: 12,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -94,7 +94,7 @@ class GameHud extends ConsumerWidget {
 
   Widget _vitalsCard(GameState state) {
     return _cardShell(
-      color: Colors.white.withAlpha(235),
+      color: Colors.black.withAlpha(140),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
@@ -124,7 +124,7 @@ class GameHud extends ConsumerWidget {
 
   Widget _skillsCard(GameState state) {
     return _cardShell(
-      color: Colors.white.withAlpha(235),
+      color: Colors.black.withAlpha(140),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -137,8 +137,9 @@ class GameHud extends ConsumerWidget {
                 Text(
                   'Edu ${state.player.education} · Int ${state.player.intelligence}',
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600,
+                    color: Colors.white,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -146,8 +147,9 @@ class GameHud extends ConsumerWidget {
                 Text(
                   'Str ${state.player.strength} · Chm ${state.player.charm}',
                   style: const TextStyle(
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: FontWeight.w600,
+                    color: Colors.white,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -157,7 +159,7 @@ class GameHud extends ConsumerWidget {
                     'Debt overdue!',
                     style: TextStyle(
                       fontSize: 10,
-                      color: Colors.red,
+                      color: Colors.redAccent,
                       fontWeight: FontWeight.bold,
                     ),
                     maxLines: 1,
@@ -169,14 +171,14 @@ class GameHud extends ConsumerWidget {
           if (onSave != null)
             InkWell(
               onTap: onSave,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
               child: Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: Colors.black.withAlpha(140),
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.white.withAlpha(40),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: const Icon(Icons.save, color: Colors.white, size: 18),
+                child: const Icon(Icons.save, color: Colors.white, size: 14),
               ),
             ),
         ],

@@ -28,6 +28,10 @@ class LifeGame extends FlameGame {
   final void Function(String npcId) onTalkTo;
   final void Function(String message) onMessage;
 
+  /// Sitting restores energy via the app's GameState (wired in GameScreen).
+  /// Defaults to a no-op so unit tests can construct LifeGame without it.
+  final void Function() onSitDown;
+
   /// Randomness for the wandering townspeople (seed it in tests).
   final Random random;
 
@@ -62,14 +66,17 @@ class LifeGame extends FlameGame {
     required this.onLeftLocation,
     required this.onTalkTo,
     required this.onMessage,
+    void Function()? onSitDown,
     Random? random,
-  }) : random = random ?? Random();
+  }) : onSitDown = onSitDown ?? (() {}),
+       random = random ?? Random();
 
   LifeInteractContext get interactContext => LifeInteractContext(
     showMessage: onMessage,
     enterLocation: enterLocation,
     openLocationMenu: onOpenLocationMenu,
     exitLocation: exitLocation,
+    sitDown: onSitDown,
     talkTo: onTalkTo,
     pickUp: onMessage,
   );
@@ -244,7 +251,15 @@ class LifeGame extends FlameGame {
 
     Interactable? best;
     var bestDist = 150.0;
+    // Touch-only: the player's feet box must overlap the target's touch
+    // zone. Same rule for benches, doors, NPCs and furniture — no
+    // long-range "nearby" popups.
+    final feet = hero.feetRect;
     void consider(Interactable target) {
+      // Scenery StreetProps (trees / lamps / hydrants) never trigger:
+      // only benches surface an action button.
+      if (target is StreetProp && !target.isInteractable) return;
+      if (!feet.overlaps(target.touchRect)) return;
       final d = target.interactPosition.distanceTo(hero.position);
       if (d < bestDist) {
         bestDist = d;

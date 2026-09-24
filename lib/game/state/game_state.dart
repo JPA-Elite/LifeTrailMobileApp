@@ -297,5 +297,14 @@ class GameState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void restSit() {
+    advanceMinutes(10);
+    player = player.copyWith(
+      energy: player.energy + 8,
+      happiness: player.happiness + 1,
+    );
+    notifyListeners();
+  }
+
   String get pesoBalance => '₱${player.money}';
 }

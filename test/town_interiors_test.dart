@@ -379,6 +379,91 @@ void main() {
     });
   });
 
+  group('touch triggers', () {
+    testWidgets('standing at a bench offers "Sit", scenery never does', (
+      tester,
+    ) async {
+      Interactable? nearest;
+      final game = LifeGame(
+        onNearestChanged: (value) => nearest = value,
+        onEnterLocation: (_) {},
+        onOpenLocationMenu: (_) {},
+        onLeftLocation: (_) {},
+        onTalkTo: (_) {},
+        onMessage: (_) {},
+        random: Random(7),
+      );
+
+      await tester.pumpWidget(GameWidget(game: game));
+      for (var i = 0; i < 30 && !game.isReady; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(game.isReady, isTrue);
+
+      final town = game.town!;
+      StreetProp propOf(String kind) =>
+          town.streetProps.firstWhere((p) => p.decoration.kind == kind);
+
+      // Collision stops the feet body flush with a solid's edge, so this is
+      // where the player really ends up after walking into the prop.
+      void standFlushAgainst(StreetProp prop) {
+        final rect = prop.toRect();
+        game.player!.position = Vector2(
+          rect.center.dx,
+          rect.bottom + PlayerComponent.feetBody.halfHeight,
+        );
+      }
+
+      // Standing at the bench: the sit action must appear.
+      final bench = propOf('bench');
+      standFlushAgainst(bench);
+      game.update(1 / 60);
+      expect(nearest, same(bench));
+      expect(nearest!.isSeat, isTrue);
+      expect(nearest!.interactLabel, 'Sit on the bench');
+
+      // Stepping away again (onto the empty highway) drops the action.
+      game.player!.position = Vector2(
+        bench.toRect().center.dx,
+        kHighwayTop + kHighwayHeight / 2,
+      );
+      game.update(1 / 60);
+      expect(nearest, isNot(same(bench)));
+
+      // Trees, lamps and hydrants are scenery: no action even when touching.
+      for (final kind in ['tree', 'lamp', 'hydrant']) {
+        final prop = propOf(kind);
+        standFlushAgainst(prop);
+        game.update(1 / 60);
+        expect(
+          nearest,
+          isNot(same(prop)),
+          reason: '$kind is scenery and must not show an action button',
+        );
+      }
+
+      // Furniture inside a room follows the same rule: standing flush with
+      // the park bench offers the sit action.
+      await game.enterLocation('park');
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(game.currentLocationId, 'park');
+
+      final room = game.activeWorld! as InteriorWorld;
+      final parkBench = room
+          .solidBounds()
+          .whereType<InteriorPropBlock>()
+          .firstWhere((p) => p.prop.label == 'BENCH');
+      game.player!.position = Vector2(
+        parkBench.center.x,
+        parkBench.toRect().bottom + PlayerComponent.feetBody.halfHeight,
+      );
+      game.update(1 / 60);
+      expect(nearest, same(parkBench));
+      expect(nearest!.isSeat, isTrue);
+      expect(nearest!.interactLabel, 'Sit on the bench');
+    });
+  });
+
   group('stickman', () {
     test('walks toward the joystick direction, faster when running', () {
       final walker = PlayerComponent(spawn: Vector2(1600, 1310));

@@ -20,20 +20,24 @@ class StatBar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          width: 52,
+          width: 44,
           child: Text(
             label,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
           ),
         ),
         SizedBox(
-          width: 90,
-          height: 10,
+          width: 80,
+          height: 8,
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(5),
+            borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: max == 0 ? 0 : (value / max).clamp(0.0, 1.0),
-              backgroundColor: Colors.black12,
+              backgroundColor: Colors.white24,
               valueColor: AlwaysStoppedAnimation(color),
             ),
           ),
@@ -41,7 +45,11 @@ class StatBar extends StatelessWidget {
         const SizedBox(width: 4),
         Text(
           '$value',
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
       ],
     );

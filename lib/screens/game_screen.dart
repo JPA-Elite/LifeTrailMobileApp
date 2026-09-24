@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,11 +31,28 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   Interactable? _nearest;
   bool _running = false;
   String _message = '';
+  Timer? _messageTimer;
   DialogueNode? _dialogue;
   String? _dialogueNpcId;
   String? _locationSheet;
   String? _error;
   final _save = PrefsSaveService();
+
+  @override
+  void dispose() {
+    _messageTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Toast-style transient banner: shows for a few seconds then clears
+  /// itself, so "You head back outside" never sticks on screen forever.
+  void _flashMessage(String text, {int seconds = 3}) {
+    _messageTimer?.cancel();
+    setState(() => _message = text);
+    _messageTimer = Timer(Duration(seconds: seconds), () {
+      if (mounted) setState(() => _message = '');
+    });
+  }
 
   @override
   void initState() {
@@ -72,7 +91,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         onOpenLocationMenu: (id) => setState(() => _locationSheet = id),
         onLeftLocation: (id) => setState(() => _locationSheet = null),
         onTalkTo: _talkTo,
-        onMessage: (m) => setState(() => _message = m),
+        onMessage: (m) => _flashMessage(m),
+        onSitDown: _performSitDown,
       );
       if (mounted) setState(() {});
       _waitForGameReady();
@@ -138,7 +158,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     // Not hard-blocking talk, but flavor if you catch them out of place
     AudioService().interact();
     if (!gs.canDoActivity('talk')) {
-      setState(() => _message = 'Too tired to talk. Rest!');
+      _flashMessage('Too tired to talk. Rest!');
       return;
     }
     gs.applyActivity('talk');
@@ -157,7 +177,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         )
         .toList();
     if (nodes.isEmpty) {
-      setState(() => _message = '${npc.name} ($expectedLoc): Hello!');
+      _flashMessage('${npc.name} ($expectedLoc): Hello!');
       return;
     }
     // Prefer 'start' that is available, else first available
@@ -263,6 +283,31 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     setState(() => _dialogue = next.isEmpty ? null : next.first);
   }
 
+  void _performSitDown() {
+    final gs = ref.read(gameStateProvider);
+    final before = gs.player.energy;
+    gs.restSit();
+    AudioService().interact();
+    final gained = gs.player.energy - before;
+    _flashMessage(
+      gained <= 0
+          ? 'You take a seat and enjoy the moment.'
+          : 'You sit down and catch your breath. (+$gained Energy)',
+      seconds: 4,
+    );
+  }
+
+  void _sitOrInteract() {
+    final target = _nearest;
+    if (target == null) return;
+    // Seats are handled on the Flutter side so energy/time actually update.
+    if (target.isSeat) {
+      _performSitDown();
+      return;
+    }
+    _game?.interactNearest();
+  }
+
   Future<void> _leaveLocation() async {
     setState(() => _locationSheet = null);
     await _game?.exitLocation();
@@ -285,9 +330,23 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       ),
     );
     if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Game saved (Slot 1)')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Color(0xFF9CCC65)),
+              SizedBox(width: 10),
+              Text('Game saved (Slot 1)'),
+            ],
+          ),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          backgroundColor: const Color(0xFF2F3A2E),
+          duration: const Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -369,7 +428,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             ),
           ActionButtons(
             interactLabel: _nearest?.interactLabel,
-            onInteract: () => _game?.interactNearest(),
+            isSeat: _nearest?.isSeat ?? false,
+            onInteract: _sitOrInteract,
             onPhone: () => _openPhone(),
             running: _running,
             onRunChanged: (v) => setState(() => _running = v),
@@ -381,19 +441,47 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               right: 0,
               child: Center(
                 child: GestureDetector(
-                  onTap: () => setState(() => _message = ''),
+                  onTap: () {
+                    _messageTimer?.cancel();
+                    setState(() => _message = '');
+                  },
                   child: Container(
+                    constraints: const BoxConstraints(maxWidth: 520),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black87,
-                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.black.withAlpha(210),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white24),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black45,
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
                     ),
-                    child: Text(
-                      _message,
-                      style: const TextStyle(color: Colors.white),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.info_outline,
+                          color: Color(0xFFFFD966),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            _message,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -411,7 +499,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               locationId: _locationSheet!,
               onClose: () => setState(() => _locationSheet = null),
               onLeave: _leaveLocation,
-              onMessage: (m) => setState(() => _message = m),
+              onMessage: (m) => _flashMessage(m),
             ),
           // Balanced status chip: centered at the bottom so it never
           // overlaps the joystick (bottom-left) or action buttons
@@ -442,8 +530,62 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (_) => const _PhoneSheet(),
     );
+  }
+
+  /// Shared pretty confirm dialog used by sleep / skip / work / eat prompts.
+  static Future<bool> showGameConfirm(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required IconData icon,
+    String confirmLabel = 'Confirm',
+  }) async {
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            backgroundColor: const Color(0xFFFBF7EC),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2E7D5B).withAlpha(25),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: const Color(0xFF2E7D5B)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Text(title)),
+              ],
+            ),
+            content: Text(message, style: const TextStyle(fontSize: 14)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D5B),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Text(confirmLabel),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    return confirmed;
   }
 }
 
@@ -579,8 +721,33 @@ class _LocationPanel extends ConsumerWidget {
     final isOpen = gs.isLocationOpen(locationId);
     Widget btn(String label, VoidCallback fn, {bool enabled = true}) => Padding(
       padding: const EdgeInsets.only(top: 6),
-      child: ElevatedButton(onPressed: enabled ? fn : null, child: Text(label)),
+      child: ElevatedButton(
+        onPressed: enabled ? fn : null,
+        style: ElevatedButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        ),
+        child: Text(label),
+      ),
     );
+    Future<void> confirmAnd(
+      String title,
+      String message,
+      IconData icon,
+      VoidCallback fn, {
+      String confirmLabel = 'Confirm',
+    }) async {
+      final ok = await _GameScreenState.showGameConfirm(
+        context,
+        title: title,
+        message: message,
+        icon: icon,
+        confirmLabel: confirmLabel,
+      );
+      if (ok) fn();
+    }
 
     if (!isOpen) {
       return [
@@ -643,10 +810,18 @@ class _LocationPanel extends ConsumerWidget {
             enabled: gs.canDoActivity('socialize'),
           ),
           btn('Sleep → next day (saves)', () {
-            AudioService().sleep();
-            gs.sleep();
-            onMessage('Day ${gs.time.day} begins. Energy restored.');
-            onClose();
+            confirmAnd(
+              'Sleep until morning?',
+              'You will wake up at 07:00 with full energy. The game saves.',
+              Icons.bedtime,
+              () {
+                AudioService().sleep();
+                gs.sleep();
+                onMessage('Day ${gs.time.day} begins. Energy restored.');
+                onClose();
+              },
+              confirmLabel: 'Sleep',
+            );
           }),
         ];
       case 'school':
@@ -690,8 +865,16 @@ class _LocationPanel extends ConsumerWidget {
             );
           }),
           btn('Skip class (warning!)', () {
-            gs.attendClass(present: false);
-            onMessage('You skipped class. A warning was recorded.');
+            confirmAnd(
+              'Skip class?',
+              'A warning will be recorded and attendance drops.',
+              Icons.warning_amber_rounded,
+              () {
+                gs.attendClass(present: false);
+                onMessage('You skipped class. A warning was recorded.');
+              },
+              confirmLabel: 'Skip',
+            );
           }),
         ];
       case 'plaza':
@@ -816,10 +999,18 @@ class _LocationPanel extends ConsumerWidget {
               onMessage('Need energy for shift!');
               return;
             }
-            onClose();
-            Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const CafeGameScreen()));
+            confirmAnd(
+              'Start café shift?',
+              'A 5-customer shift takes 3h and −25 energy. Salary up to ₱300.',
+              Icons.coffee,
+              () {
+                onClose();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const CafeGameScreen()),
+                );
+              },
+              confirmLabel: 'Start shift',
+            );
           }, enabled: gs.canDoActivity('work')),
         ];
       default:
@@ -834,150 +1025,227 @@ class _PhoneSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final gs = ref.watch(gameStateProvider);
+    final size = MediaQuery.of(context).size;
+    final sheetW = size.width * 0.9;
+    final sheetH = (size.height * 0.78).clamp(420.0, 640.0);
     return SafeArea(
-      child: Container(
-        height: MediaQuery.of(context).size.height * 0.75,
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'PHONE',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              'Day ${gs.time.day} · ${gs.time.weekdayLabel} ${gs.time.clockLabel} · ${gs.pesoBalance}',
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: GridView.count(
-                crossAxisCount: 4,
+      child: Center(
+        child: Container(
+          width: sheetW,
+          height: sheetH,
+          decoration: BoxDecoration(
+            color: const Color(0xFF111417),
+            borderRadius: BorderRadius.circular(36),
+          ),
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 110,
+                  height: 20,
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1B3A2D),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'Day ${gs.time.day} · ${gs.time.clockLabel}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      gs.pesoBalance,
+                      style: const TextStyle(
+                        color: Color(0xFFFFD966),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(240),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: GridView.count(
+                    crossAxisCount: 4,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 6,
                 children: [
-                  _tile(
-                    context,
-                    Icons.chat,
+                  _phoneTile(
+                    Icons.chat_bubble_rounded,
                     'Messages',
-                    () => _info(
+                    const Color(0xFF4A86E8),
+                    () => _phoneInfo(
                       context,
-                      ref,
                       'Messages',
-                      'Alex: "Are you coming to the plaza?"',
+                      'Alex: plaza later?',
                     ),
                   ),
-                  _tile(
-                    context,
-                    Icons.people,
+                  _phoneTile(
+                    Icons.contacts_rounded,
                     'Contacts',
-                    () => _info(
+                    const Color(0xFF8E7CC3),
+                    () => _phoneInfo(
                       context,
-                      ref,
                       'Contacts',
-                      gs.npcs.values
-                          .map((n) => '${n.name} (${n.relationship})')
-                          .join('\n'),
+                      'No contacts yet.',
                     ),
                   ),
-                  _tile(
-                    context,
-                    Icons.calendar_month,
+                  _phoneTile(
+                    Icons.calendar_month_rounded,
                     'Calendar',
-                    () => _info(
+                    const Color(0xFFE69138),
+                    () => _phoneInfo(
                       context,
-                      ref,
                       'Calendar',
-                      'Mon–Fri: School\nSun: Church 10:00\nCafé shifts 17:00–20:00',
+                      'Mon-Fri: School',
                     ),
                   ),
-                  _tile(
-                    context,
-                    Icons.map,
+                  _phoneTile(
+                    Icons.map_rounded,
                     'Map',
-                    () => _info(
+                    const Color(0xFF6AA84F),
+                    () => _phoneInfo(
                       context,
-                      ref,
                       'Map',
-                      'School (N) · Plaza (center) · Home (S) · Café (far S)',
+                      'School - Plaza - Home - Cafe',
                     ),
                   ),
-                  _tile(
-                    context,
-                    Icons.wallet,
+                  _phoneTile(
+                    Icons.account_balance_wallet_rounded,
                     'Finance',
-                    () => _info(
+                    const Color(0xFFB45F06),
+                    () => _phoneInfo(
                       context,
-                      ref,
                       'Finance',
-                      'Balance: ${gs.pesoBalance}\nTip: work at the café.',
+                      'Balance: ${gs.pesoBalance}',
                     ),
                   ),
-                  _tile(
-                    context,
-                    Icons.backpack,
+                  _phoneTile(
+                    Icons.backpack_rounded,
                     'Quests',
-                    () => _info(
+                    const Color(0xFFCC4125),
+                    () => _phoneInfo(
                       context,
-                      ref,
                       'Quests',
-                      gs.quests.values
-                          .map(
-                            (q) =>
-                                '${q.title}: ${q.status.name}\n${q.objectives.map((o) => '${o.done ? '[x]' : '[ ]'} ${o.description}').join('\n')}',
-                          )
-                          .join('\n\n'),
+                      'No quests yet.',
                     ),
                   ),
-                  _tile(
-                    context,
-                    Icons.school,
+                  _phoneTile(
+                    Icons.school_rounded,
                     'School',
-                    () => _info(
+                    const Color(0xFF2E7D5B),
+                    () => _phoneInfo(
                       context,
-                      ref,
                       'School',
-                      'Attendance: ${(gs.player.attendanceRate * 100).toStringAsFixed(0)}%\nEducation: ${gs.player.education}',
+                      'Edu: ${gs.player.education}',
                     ),
                   ),
-                  _tile(context, Icons.settings, 'Settings', () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).pushNamed('/settings');
-                  }),
+                  _phoneTile(
+                    Icons.settings_rounded,
+                    'Settings',
+                    const Color(0xFF5B5B5B),
+                    () {
+                      Navigator.of(context).pop();
+                      Navigator.of(context).pushNamed('/settings');
+                    },
+                  ),
                 ],
               ),
             ),
-          ],
+          ),
+          Center(
+            child: Container(
+              width: 110,
+              height: 5,
+              margin: const EdgeInsets.only(top: 8, bottom: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(140),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _tile(
-    BuildContext context,
+  Widget _phoneTile(
     IconData icon,
     String label,
+    Color tint,
     VoidCallback onTap,
   ) {
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CircleAvatar(child: Icon(icon)),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: tint,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: Colors.white, size: 22),
+          ),
           const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 11)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  void _info(BuildContext context, WidgetRef ref, String title, String body) {
+  void _phoneInfo(BuildContext context, String title, String body) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        backgroundColor: const Color(0xFFFBF7EC),
         title: Text(title),
         content: Text(body),
         actions: [
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.of(context).pop(),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D5B),
+            ),
             child: const Text('Close'),
           ),
         ],

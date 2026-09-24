@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 class ActionButtons extends StatelessWidget {
   final String? interactLabel;
+  final bool isSeat;
   final VoidCallback onInteract;
   final VoidCallback onPhone;
   final bool running;
@@ -10,6 +11,7 @@ class ActionButtons extends StatelessWidget {
   const ActionButtons({
     super.key,
     required this.interactLabel,
+    this.isSeat = false,
     required this.onInteract,
     required this.onPhone,
     required this.running,
@@ -36,11 +38,22 @@ class ActionButtons extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: ElevatedButton.icon(
                   onPressed: onInteract,
-                  icon: const Icon(Icons.touch_app),
+                  icon: Icon(
+                    isSeat ? Icons.chair_alt : Icons.touch_app,
+                  ),
                   label: Text(interactLabel!),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.shade700,
+                    backgroundColor: isSeat
+                        ? const Color(0xFF2E7D5B)
+                        : Colors.amber.shade700,
                     foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                   ),
                 ),
               ),
