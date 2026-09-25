@@ -1223,6 +1223,10 @@ class _PhoneSheet extends ConsumerWidget {
             style: const TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w600,
+              // The app grid panel is always white, but the app follows
+              // the system theme: without an explicit color the labels
+              // turn white-on-white in dark mode.
+              color: Color(0xFF1A1D21),
             ),
           ),
         ],
@@ -1238,6 +1242,17 @@ class _PhoneSheet extends ConsumerWidget {
           borderRadius: BorderRadius.circular(20),
         ),
         backgroundColor: const Color(0xFFFBF7EC),
+        // Cream background in both modes: pin dark text so this never
+        // becomes white-on-white under the system dark theme.
+        titleTextStyle: const TextStyle(
+          color: Color(0xFF1A1D21),
+          fontWeight: FontWeight.bold,
+          fontSize: 18,
+        ),
+        contentTextStyle: const TextStyle(
+          color: Color(0xFF1A1D21),
+          fontSize: 14,
+        ),
         title: Text(title),
         content: Text(body),
         actions: [

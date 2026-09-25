@@ -57,6 +57,73 @@ class TownWorld extends LifeWorld {
     }
 
     _spawnPedestrians();
+
+    // Load custom lot sprites in the background: assigning the field later
+    // is safe (no mount lifecycle involved), and gameplay / collision must
+    // not wait for image decodes.
+    _loadLotSprite(
+      'home.png',
+      'home',
+      scale: 1.7,
+      widthBoost: 1.15,
+      labelColor: Colors.white,
+    );
+    _loadLotSprite(
+      'plaza.jpg',
+      'plaza',
+      scale: 1.3,
+      widthBoost: 1.15,
+      labelColor: Colors.white,
+    );
+    _loadLotSprite(
+      'school.jpg',
+      'school',
+      scale: 1.15,
+      widthBoost: 1.4,
+      labelColor: Colors.white,
+    );
+    _loadLotSprite(
+      'church.png',
+      'church',
+      scale: 1.5,
+      widthBoost: 1.6,
+      labelColor: Colors.white,
+    );
+    _loadLotSprite(
+      'park.jpg',
+      'park',
+      scale: 1.15,
+      widthBoost: 1.4,
+      labelColor: Colors.white,
+    );
+    _loadLotSprite(
+      'cafe.png',
+      'workplace',
+      scale: 1.3,
+      widthBoost: 1.1,
+      labelColor: Colors.white,
+    );
+  }
+
+  void _loadLotSprite(
+    String file,
+    String locationId, {
+    double scale = 1.0,
+    double widthBoost = 1.0,
+    Color labelColor = Colors.black87,
+  }) {
+    Sprite.load(file).then((sprite) {
+      for (final b in buildings) {
+        if (b.location.id == locationId) {
+          b.setSprite(
+            sprite,
+            scale: scale,
+            widthBoost: widthBoost,
+            labelColor: labelColor,
+          );
+        }
+      }
+    }).catchError((_) {});
   }
 
   /// A handful of townspeople wandering the sidewalks on their own routes.
@@ -440,6 +507,11 @@ class BuildingBlock extends RectangleComponent implements Interactable {
   static const double doorWidth = 96;
   static const double doorHeight = 26;
 
+  Sprite? _lotSprite;
+  double _spriteScale = 1.0;
+  double _spriteWidthBoost = 1.0;
+  Color _spriteLabelColor = Colors.black87;
+
   BuildingBlock({
     required this.location,
     required this.interactId,
@@ -450,6 +522,21 @@ class BuildingBlock extends RectangleComponent implements Interactable {
          priority: 10,
          paint: Paint()..color = Color(location.color),
        );
+
+  /// Called once [TownWorld] finishes loading the lot art in the
+  /// background. Synchronous so mounting a building never races with
+  /// swapping the world in/out.
+  void setSprite(
+    Sprite sprite, {
+    double scale = 1.0,
+    double widthBoost = 1.0,
+    Color labelColor = Colors.black87,
+  }) {
+    _lotSprite = sprite;
+    _spriteScale = scale;
+    _spriteWidthBoost = widthBoost;
+    _spriteLabelColor = labelColor;
+  }
 
   /// Doorway on the wall facing the street, so the player can see where to
   /// go in.
@@ -478,6 +565,38 @@ class BuildingBlock extends RectangleComponent implements Interactable {
 
   @override
   void render(Canvas canvas) {
+    // Buildings with custom art render it as a top-down lot tile: the art
+    // is native north-facing (street/gate edge on top), drawn aspect-fit
+    // with per-lot scale, gate end toward the door side. No solid color
+    // box behind it. Collision / door logic is unchanged.
+    final lotSprite = _lotSprite;
+    if (lotSprite != null) {
+      // Soft grounding shadow along the south edge.
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(size.x / 2, size.y - 6),
+          width: size.x * 0.88,
+          height: 40,
+        ),
+        Paint()..color = const Color(0x2E000000),
+      );
+      final src = lotSprite.srcSize;
+      final scale = min(size.x / src.x, size.y / src.y) * _spriteScale;
+      final drawSize = Vector2(
+        src.x * scale * _spriteWidthBoost,
+        src.y * scale,
+      );
+      final offset = (size - drawSize) / 2;
+      lotSprite.render(canvas, position: offset, size: drawSize);
+      drawCenteredLabel(
+        canvas,
+        Vector2(size.x, size.y + 36),
+        location.name,
+        color: _spriteLabelColor,
+        fontSize: 28,
+      );
+      return;
+    }
     super.render(canvas);
 
     // Roof trim, windows and the doorway.
