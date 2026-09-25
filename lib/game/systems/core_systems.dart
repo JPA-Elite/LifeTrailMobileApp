@@ -149,6 +149,81 @@ class LocationHours {
         'end': 20 * 60 + 30,
       },
     ],
+    'bank': [
+      {
+        'weekdays': ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+        'start': 9 * 60,
+        'end': 16 * 60,
+      },
+    ],
+    'mall': [
+      {
+        'weekdays': ['any'],
+        'start': 10 * 60,
+        'end': 21 * 60,
+      },
+    ],
+    'repair': [
+      {
+        'weekdays': ['any'],
+        'start': 9 * 60,
+        'end': 18 * 60,
+      },
+    ],
+    'bookstore': [
+      {
+        'weekdays': ['any'],
+        'start': 9 * 60,
+        'end': 20 * 60,
+      },
+    ],
+    'supermarket': [
+      {
+        'weekdays': ['any'],
+        'start': 8 * 60,
+        'end': 22 * 60,
+      },
+    ],
+    'pizzahut': [
+      {
+        'weekdays': ['any'],
+        'start': 11 * 60,
+        'end': 22 * 60,
+      },
+    ],
+    'hospital': [], // always open
+    'restaurant': [
+      {
+        'weekdays': ['any'],
+        'start': 11 * 60,
+        'end': 22 * 60,
+      },
+    ],
+    'laundry': [
+      {
+        'weekdays': ['any'],
+        'start': 8 * 60,
+        'end': 20 * 60,
+      },
+    ],
+    'police': [], // always open
+    'computer': [
+      {
+        'weekdays': ['any'],
+        'start': 9 * 60,
+        'end': 21 * 60,
+      },
+    ],
+    'amusement': [
+      {
+        'weekdays': ['any'],
+        'start': 10 * 60,
+        'end': 21 * 60,
+      },
+    ],
+    'beach': [], // always open
+    'fishing': [], // always open
+    'hotel': [], // always open
   };
 
   static bool isOpen(String locationId, String weekdayLabel, int minutes) {

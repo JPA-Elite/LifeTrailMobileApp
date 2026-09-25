@@ -2,29 +2,27 @@ import 'dart:ui' show Rect;
 
 import '../../models/location_dialogue.dart';
 
-const double kWorldWidth = 3200;
-const double kWorldHeight = 1800;
+const double kWorldWidth = 3900;
+const double kWorldHeight = 2900;
 
 // --- Highways -------------------------------------------------------------
 
-/// Main east-west highway: two lanes each way.
-const double kHighwayTop = 800;
-const double kHighwayHeight = 220;
-const double kHighwayBottom = kHighwayTop + kHighwayHeight;
-
-/// Sidewalks hugging the highway on both sides.
+/// Five parallel town bands, each split by its own east-west highway.
+const double kHighwayHeight = 160;
 const double kSidewalkHeight = 46;
-const double kSidewalkNorthTop = kHighwayTop - kSidewalkHeight;
-const double kSidewalkSouthBottom = kHighwayBottom + kSidewalkHeight;
+const List<double> kHighwayTops = [430, 990, 1590, 2190];
 
-/// North-south street crossing the highway (a T with a full crossroad).
-const double kCrossStreetLeft = 2080;
+/// Bottom edge of the highway starting at [top].
+double highwayBottom(double top) => top + kHighwayHeight;
+
+/// True when the vertical span [top, bottom] touches any highway asphalt.
+bool overlapsHighway(double top, double bottom) =>
+    kHighwayTops.any((t) => top < t + kHighwayHeight && bottom > t);
+
+/// North-south street crossing every highway.
+const double kCrossStreetLeft = 2780;
 const double kCrossStreetWidth = 200;
 const double kCrossStreetRight = kCrossStreetLeft + kCrossStreetWidth;
-
-/// Vertical band of the highway's shoulder on the outside of each sidewalk.
-const double kNorthSidewalk = kSidewalkNorthTop;
-const double kSouthSidewalk = kSidewalkSouthBottom;
 
 // --- Streets --------------------------------------------------------------
 
@@ -44,58 +42,117 @@ class TownStrip {
   });
 }
 
-/// Asphalt + sidewalks, drawn under everything else.
+/// Asphalt + sidewalks, drawn under everything else. The cross street is
+/// drawn first so every highway stays continuous over the junctions.
 List<TownStrip> buildTownRoads() => [
-  // Highway asphalt.
-  const TownStrip(
-    x: 0,
-    y: kHighwayTop,
-    w: kWorldWidth,
-    h: kHighwayHeight,
-    color: 0xFF4A4A4A,
-  ),
-  // Sidewalks on both shoulders.
-  const TownStrip(
-    x: 0,
-    y: kSidewalkNorthTop,
-    w: kWorldWidth,
-    h: kSidewalkHeight,
-    color: 0xFFC9C4B8,
-  ),
-  const TownStrip(
-    x: 0,
-    y: kHighwayBottom,
-    w: kWorldWidth,
-    h: kSidewalkHeight,
-    color: 0xFFC9C4B8,
-  ),
-  // North-south street, asphalt only outside the highway band.
   const TownStrip(
     x: kCrossStreetLeft,
     y: 0,
     w: kCrossStreetWidth,
-    h: kHighwayTop,
+    h: kWorldHeight,
     color: 0xFF555555,
   ),
-  const TownStrip(
-    x: kCrossStreetLeft,
-    y: kHighwayBottom,
-    w: kCrossStreetWidth,
-    h: kWorldHeight - kHighwayBottom,
-    color: 0xFF555555,
-  ),
+  for (final top in kHighwayTops) ...[
+    TownStrip(
+      x: 0,
+      y: top,
+      w: kWorldWidth,
+      h: kHighwayHeight,
+      color: 0xFF4A4A4A,
+    ),
+    TownStrip(
+      x: 0,
+      y: top - kSidewalkHeight,
+      w: kWorldWidth,
+      h: kSidewalkHeight,
+      color: 0xFFC9C4B8,
+    ),
+    TownStrip(
+      x: 0,
+      y: top + kHighwayHeight,
+      w: kWorldWidth,
+      h: kSidewalkHeight,
+      color: 0xFFC9C4B8,
+    ),
+  ],
 ];
 
 // --- Buildings ------------------------------------------------------------
 
-/// Buildings sit clear of the highway: north-side ones face south, south-side
-/// ones face north, and every door opens onto a sidewalk.
+/// Buildings sit clear of the roads: north-side ones face south, south-side
+/// ones face north, and every door opens onto a street or sidewalk.
 List<LocationModel> buildTownLocations() => [
+  // --- Band 1: northern shops (doors face south) ---
+  const LocationModel(
+    id: 'repair',
+    name: 'Repair Shop',
+    x: 60,
+    y: 90,
+    w: 440,
+    h: 280,
+    color: 0xFF8E9E9E,
+  ),
+  const LocationModel(
+    id: 'bookstore',
+    name: 'Book Store',
+    x: 1050,
+    y: 90,
+    w: 440,
+    h: 280,
+    color: 0xFFB45F06,
+  ),
+  const LocationModel(
+    id: 'supermarket',
+    name: 'Super Market',
+    x: 1900,
+    y: 90,
+    w: 560,
+    h: 280,
+    color: 0xFF6AA84F,
+  ),
+  const LocationModel(
+    id: 'pizzahut',
+    name: 'Pizza Hut',
+    x: 3020,
+    y: 90,
+    w: 480,
+    h: 280,
+    color: 0xFFE06666,
+  ),
+  // --- Band 2: hospital row (doors face south) ---
+  const LocationModel(
+    id: 'hospital',
+    name: 'Hospital',
+    x: 60,
+    y: 650,
+    w: 440,
+    h: 280,
+    color: 0xFFF1F1F1,
+  ),
+  const LocationModel(
+    id: 'restaurant',
+    name: 'Restaurant',
+    x: 60,
+    y: 1210,
+    w: 440,
+    h: 240,
+    color: 0xFFE69138,
+  ),
+  const LocationModel(
+    id: 'laundry',
+    name: 'Laundry Shop',
+    x: 60,
+    y: 1810,
+    w: 440,
+    h: 280,
+    color: 0xFF6FA8DC,
+  ),
+  // --- Band 3: home row (doors face south) ---
   const LocationModel(
     id: 'school',
     name: 'School',
-    x: 1380,
-    y: 430,
+    x: 2080,
+    y: 650,
     w: 440,
     h: 280,
     color: 0xFF6FA8DC,
@@ -103,8 +160,8 @@ List<LocationModel> buildTownLocations() => [
   const LocationModel(
     id: 'church',
     name: 'Church',
-    x: 220,
-    y: 440,
+    x: 920,
+    y: 650,
     w: 380,
     h: 260,
     color: 0xFFD9D2E9,
@@ -112,17 +169,18 @@ List<LocationModel> buildTownLocations() => [
   const LocationModel(
     id: 'park',
     name: 'Park',
-    x: 2400,
-    y: 430,
+    x: 3100,
+    y: 650,
     w: 420,
     h: 300,
     color: 0xFF6AA84F,
   ),
+  // --- Band 4: bank row (doors face south) ---
   const LocationModel(
     id: 'home',
     name: 'Home',
-    x: 640,
-    y: 1180,
+    x: 1340,
+    y: 1210,
     w: 440,
     h: 280,
     color: 0xFFE6B8AF,
@@ -131,8 +189,8 @@ List<LocationModel> buildTownLocations() => [
   const LocationModel(
     id: 'plaza',
     name: 'Plaza',
-    x: 1420,
-    y: 1140,
+    x: 2120,
+    y: 1210,
     w: 460,
     h: 320,
     color: 0xFF93C47D,
@@ -141,11 +199,90 @@ List<LocationModel> buildTownLocations() => [
   const LocationModel(
     id: 'workplace',
     name: 'Café',
-    x: 2520,
-    y: 1110,
+    x: 3220,
+    y: 1210,
     w: 600,
     h: 320,
     color: 0xFFFFD966,
+    doorSide: 'top',
+  ),
+  // --- Band 4: bank row (doors face south), police included ---
+  const LocationModel(
+    id: 'bank',
+    name: 'Bank',
+    x: 780,
+    y: 1810,
+    w: 460,
+    h: 300,
+    color: 0xFFB7C9E2,
+  ),
+  const LocationModel(
+    id: 'mall',
+    name: 'Mall',
+    x: 3020,
+    y: 1810,
+    w: 560,
+    h: 320,
+    color: 0xFFD5A6BD,
+  ),
+  const LocationModel(
+    id: 'police',
+    name: 'Police Station',
+    x: 2120,
+    y: 1810,
+    w: 460,
+    h: 280,
+    color: 0xFF4A86E8,
+  ),
+  // --- Band 5: southern row (doors face north) ---
+  const LocationModel(
+    id: 'computer',
+    name: 'Computer Center',
+    x: 120,
+    y: 2410,
+    w: 440,
+    h: 300,
+    color: 0xFF8E7CC3,
+    doorSide: 'top',
+  ),
+  const LocationModel(
+    id: 'amusement',
+    name: 'Amusement Park',
+    x: 700,
+    y: 2410,
+    w: 560,
+    h: 300,
+    color: 0xFFFFD966,
+    doorSide: 'top',
+  ),
+  const LocationModel(
+    id: 'beach',
+    name: 'Beach',
+    x: 1400,
+    y: 2410,
+    w: 480,
+    h: 300,
+    color: 0xFF4DD0E1,
+    doorSide: 'top',
+  ),
+  const LocationModel(
+    id: 'fishing',
+    name: 'Fishing Area',
+    x: 2020,
+    y: 2410,
+    w: 480,
+    h: 300,
+    color: 0xFF6D9EEB,
+    doorSide: 'top',
+  ),
+  const LocationModel(
+    id: 'hotel',
+    name: 'Hotel',
+    x: 3020,
+    y: 2410,
+    w: 560,
+    h: 300,
+    color: 0xFFB39DDB,
     doorSide: 'top',
   ),
 ];
@@ -165,9 +302,9 @@ class TownDecoration {
   bool get solid => kind != 'bush' && kind != 'flowers';
 }
 
-/// Spaced along both shoulders: street trees, benches, lamps and hedges.
-/// Decoration x/y is the point where it meets the ground, and anything too
-/// close to a doorway is skipped so entrances stay walkable.
+/// Spaced along every highway's shoulders: street trees, benches, lamps
+/// and hedges. Decoration x/y is the point where it meets the ground, and
+/// anything too close to a doorway is skipped so entrances stay walkable.
 List<TownDecoration> buildTownDecorations() {
   final out = <TownDecoration>[];
   final doors = buildTownLocations().map((l) => l.x + l.w / 2).toList();
@@ -175,60 +312,68 @@ List<TownDecoration> buildTownDecorations() {
   bool clearOfDoors(double x, {double margin = 170}) =>
       doors.every((dx) => (dx - x).abs() > margin);
 
-  // Street trees on the verges either side of the highway.
-  for (var x = 240.0; x < kWorldWidth - 140; x += 280) {
-    if (x > kCrossStreetLeft - 140 && x < kCrossStreetRight + 140) continue;
-    if (clearOfDoors(x)) {
-      out.add(TownDecoration('tree', x, kSidewalkNorthTop - 12, 132));
-      out.add(TownDecoration('tree', x + 150, kSidewalkSouthBottom + 12, 132));
+  for (final top in kHighwayTops) {
+    final bottom = top + kHighwayHeight;
+    // Street trees on the verges either side of the highway.
+    for (var x = 240.0; x < kWorldWidth - 140; x += 280) {
+      if (x > kCrossStreetLeft - 140 && x < kCrossStreetRight + 140) continue;
+      if (clearOfDoors(x)) {
+        out.add(TownDecoration('tree', x, top - kSidewalkHeight - 12, 132));
+        out.add(TownDecoration('tree', x + 150, bottom + kSidewalkHeight + 12, 132));
+      }
     }
-  }
 
-  // Benches and lamps along the sidewalks, clear of the doorways so no
-  // entrance is blocked.
-  for (var x = 420.0; x < kWorldWidth - 220; x += 420) {
-    if (x > kCrossStreetLeft - 180 && x < kCrossStreetRight + 180) continue;
-    if (clearOfDoors(x, margin: 130)) {
-      out.add(TownDecoration('bench', x, kSidewalkNorthTop + 24, 84));
+    // Benches and lamps along the sidewalks, clear of the doorways so no
+    // entrance is blocked.
+    for (var x = 420.0; x < kWorldWidth - 220; x += 420) {
+      if (x > kCrossStreetLeft - 180 && x < kCrossStreetRight + 180) continue;
+      if (clearOfDoors(x, margin: 130)) {
+        out.add(TownDecoration('bench', x, top - kSidewalkHeight + 24, 84));
+      }
+      if (clearOfDoors(x + 210, margin: 130)) {
+        out.add(TownDecoration('bench', x + 210, bottom + 26, 84));
+      }
     }
-    if (clearOfDoors(x + 210, margin: 130)) {
-      out.add(TownDecoration('bench', x + 210, kHighwayBottom + 26, 84));
+    for (var x = 300.0; x < kWorldWidth - 100; x += 340) {
+      if (clearOfDoors(x, margin: 100)) {
+        out.add(TownDecoration('lamp', x, top - kSidewalkHeight + 8, 60));
+      }
+      if (clearOfDoors(x + 170, margin: 100)) {
+        out.add(TownDecoration('lamp', x + 170, bottom + 40, 60));
+      }
     }
-  }
-  for (var x = 300.0; x < kWorldWidth - 100; x += 340) {
-    if (clearOfDoors(x, margin: 100)) {
-      out.add(TownDecoration('lamp', x, kSidewalkNorthTop + 8, 60));
-    }
-    if (clearOfDoors(x + 170, margin: 100)) {
-      out.add(TownDecoration('lamp', x + 170, kHighwayBottom + 40, 60));
-    }
-  }
 
-  // Hedges and flower beds in the grass, clear of the doorways.
-  for (var x = 160.0; x < kWorldWidth - 260; x += 360) {
-    if (clearOfDoors(x, margin: 210)) {
-      out.add(TownDecoration('bush', x, kSidewalkNorthTop - 60, 96));
-      out.add(
-        TownDecoration('flowers', x + 180, kSidewalkSouthBottom + 96, 70),
-      );
+    // Hedges and flower beds in the grass, clear of the doorways.
+    for (var x = 160.0; x < kWorldWidth - 260; x += 360) {
+      if (clearOfDoors(x, margin: 210)) {
+        out.add(TownDecoration('bush', x, top - kSidewalkHeight - 60, 96));
+        out.add(
+          TownDecoration('flowers', x + 180, bottom + kSidewalkHeight + 96, 70),
+        );
+      }
     }
   }
-  out.add(const TownDecoration('hydrant', 1180, kSidewalkSouthBottom + 20, 44));
-  out.add(const TownDecoration('hydrant', 2860, kSidewalkNorthTop + 20, 44));
+  out.add(const TownDecoration('hydrant', 700, 1216, 44));
+  out.add(const TownDecoration('hydrant', 3300, 1564, 44));
 
   return out;
 }
 
-/// Where the wanderers of the town are allowed to roam: the two sidewalks
-/// either side of the highway plus the cross-street pavement.
+/// Where the wanderers of the town are allowed to roam: the sidewalks of
+/// every highway plus the cross-street pavement between them.
 List<Rect> buildPedestrianBands() => [
-  const Rect.fromLTRB(140, 758, 3060, 796),
-  const Rect.fromLTRB(140, 1024, 3060, 1062),
-  const Rect.fromLTRB(kCrossStreetLeft + 30, 240, kCrossStreetRight - 30, 760),
-  const Rect.fromLTRB(
-    kCrossStreetLeft + 30,
-    1060,
-    kCrossStreetRight - 30,
-    1500,
-  ),
+  for (final top in kHighwayTops) ...[
+    Rect.fromLTRB(140, top - 42, 3760, top - 4),
+    Rect.fromLTRB(
+      140,
+      top + kHighwayHeight + 4,
+      3760,
+      top + kHighwayHeight + 42,
+    ),
+  ],
+  const Rect.fromLTRB(2810, 60, 2950, 400),
+  const Rect.fromLTRB(2810, 640, 2950, 960),
+  const Rect.fromLTRB(2810, 1210, 2950, 1560),
+  const Rect.fromLTRB(2810, 1810, 2950, 2160),
+  const Rect.fromLTRB(2810, 2410, 2950, 2840),
 ];

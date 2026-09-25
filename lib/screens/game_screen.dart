@@ -93,6 +93,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         onTalkTo: _talkTo,
         onMessage: (m) => _flashMessage(m),
         onSitDown: _performSitDown,
+        onUseAtm: _openAtm,
       );
       if (mounted) setState(() {});
       _waitForGameReady();
@@ -297,8 +298,69 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
-  void _sitOrInteract() {
-    final target = _nearest;
+  void _openAtm() {
+    final gs = ref.read(gameStateProvider);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        backgroundColor: const Color(0xFFFBF7EC),
+        titleTextStyle: const TextStyle(
+          color: Color(0xFF1A1D21),
+          fontWeight: FontWeight.bold,
+          fontSize: 18,
+        ),
+        contentTextStyle: const TextStyle(
+          color: Color(0xFF1A1D21),
+          fontSize: 14,
+        ),
+        title: const Text('ATM'),
+        content: Text('Balance: ${gs.pesoBalance}\nWithdraw cash? (takes 5m)'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              gs.addMoney(200);
+              gs.advanceMinutes(5);
+              AudioService().coins();
+              Navigator.of(ctx).pop();
+              _flashMessage(
+                'Withdrew ₱200. Balance: ${gs.pesoBalance}',
+                seconds: 4,
+              );
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D5B),
+            ),
+            child: const Text('₱200'),
+          ),
+          FilledButton(
+            onPressed: () {
+              gs.addMoney(500);
+              gs.advanceMinutes(5);
+              AudioService().coins();
+              Navigator.of(ctx).pop();
+              _flashMessage(
+                'Withdrew ₱500. Balance: ${gs.pesoBalance}',
+                seconds: 4,
+              );
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D5B),
+            ),
+            child: const Text('₱500'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _sitOrInteract() {    final target = _nearest;
     if (target == null) return;
     // Seats are handled on the Flutter side so energy/time actually update.
     if (target.isSeat) {
@@ -692,6 +754,36 @@ class _LocationPanel extends ConsumerWidget {
         return 'Park';
       case 'workplace':
         return 'Sunbeam Café';
+      case 'bank':
+        return 'First Bank';
+      case 'mall':
+        return 'Grand Mall';
+      case 'repair':
+        return 'Fix-It Repair';
+      case 'bookstore':
+        return 'Book Store';
+      case 'supermarket':
+        return 'Super Market';
+      case 'pizzahut':
+        return 'Pizza Hut';
+      case 'hospital':
+        return 'Hospital';
+      case 'restaurant':
+        return 'Restaurant';
+      case 'laundry':
+        return 'Laundry Shop';
+      case 'police':
+        return 'Police Station';
+      case 'computer':
+        return 'Computer Center';
+      case 'amusement':
+        return 'Amusement Park';
+      case 'beach':
+        return 'Beach';
+      case 'fishing':
+        return 'Fishing Area';
+      case 'hotel':
+        return 'Hotel';
       default:
         return id;
     }
@@ -709,6 +801,36 @@ class _LocationPanel extends ConsumerWidget {
         return 'Daily 06:00–21:00';
       case 'workplace':
         return 'Mon–Sat 17:00–20:30';
+      case 'bank':
+        return 'Mon–Fri 09:00–16:00';
+      case 'mall':
+        return 'Daily 10:00–21:00';
+      case 'repair':
+        return 'Daily 09:00–18:00';
+      case 'bookstore':
+        return 'Daily 09:00–20:00';
+      case 'supermarket':
+        return 'Daily 08:00–22:00';
+      case 'pizzahut':
+        return 'Daily 11:00–22:00';
+      case 'hospital':
+        return 'Always open';
+      case 'restaurant':
+        return 'Daily 11:00–22:00';
+      case 'laundry':
+        return 'Daily 08:00–20:00';
+      case 'police':
+        return 'Always open';
+      case 'computer':
+        return 'Daily 09:00–21:00';
+      case 'amusement':
+        return 'Daily 10:00–21:00';
+      case 'beach':
+        return 'Always open';
+      case 'fishing':
+        return 'Always open';
+      case 'hotel':
+        return 'Always open';
       case 'home':
         return 'Always open';
       default:
@@ -988,8 +1110,7 @@ class _LocationPanel extends ConsumerWidget {
           Text(
             'Shift: 17:00–20:30 · Salary ₱300 (Energy -25)',
             style: const TextStyle(fontSize: 12),
-          ),
-          if (gs.isExhausted)
+          ),          if (gs.isExhausted)
             const Text(
               'Too tired for shift! Rest first.',
               style: TextStyle(fontSize: 11, color: Colors.red),
@@ -1012,6 +1133,259 @@ class _LocationPanel extends ConsumerWidget {
               confirmLabel: 'Start shift',
             );
           }, enabled: gs.canDoActivity('work')),
+        ];
+      case 'bank':
+        return [
+          Text(
+            'Balance: ${gs.pesoBalance}',
+            style: const TextStyle(fontSize: 12),
+          ),
+          btn('Withdraw allowance ₱200 (5m)', () {
+            gs.addMoney(200);
+            gs.advanceMinutes(5);
+            AudioService().coins();
+            onMessage('Withdrew ₱200 allowance. Balance: ${gs.pesoBalance}');
+          }),
+          btn('Check balance', () {
+            onMessage('Balance: ${gs.pesoBalance}');
+          }),
+        ];
+      case 'mall':
+        return [
+          btn('Buy snacks ₱30', () {
+            final r = gs.removeMoney(30);
+            if (r.ok) {
+              gs.addItem('bread', 1);
+              onMessage('Bought snacks. Check inventory to eat.');
+            } else {
+              onMessage('Not enough money.');
+            }
+          }),
+          btn(
+            'Browse shops (+Charm 1, 30m)',
+            () {
+              if (!gs.canDoActivity('socialize')) {
+                onMessage('Too tired.');
+                return;
+              }
+              gs.applyActivity('rest');
+              gs.addCharm(1);
+              onMessage('Window shopping. Charm +1.');
+            },
+            enabled: gs.canDoActivity('socialize'),
+          ),
+          btn('Food court meal ₱50 (+10 energy)', () {
+            final r = gs.removeMoney(50);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            if (!gs.canDoActivity('eat')) {
+              gs.addMoney(50);
+              onMessage('Too exhausted to eat? Rest first! (refunded)');
+              return;
+            }
+            gs.eatMeal();
+            onMessage('A filling food court meal. Energy +10.');
+          }, enabled: gs.canDoActivity('eat')),
+        ];
+      case 'repair':
+        return [
+          btn('Repair bike ₱80 (30m)', () {
+            final r = gs.removeMoney(80);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            gs.advanceMinutes(30);
+            onMessage('Bike tuned up. Rides like new.');
+          }),
+          btn('Browse tools', () {
+            gs.applyActivity('walk');
+            onMessage('Wrenches, chains, and spare bells.');
+          }),
+        ];
+      case 'bookstore':
+        return [
+          btn(
+            'Read manga (+Int 1, 30m)',
+            () {
+              if (!gs.canDoActivity('study')) {
+                onMessage('Too tired.');
+                return;
+              }
+              gs.applyActivity('study');
+              gs.addIntelligence(1);
+              onMessage('A whole volume in one sitting. Intelligence +1.');
+            },
+            enabled: gs.canDoActivity('study'),
+          ),
+          btn('Buy notebook ₱20', () {
+            final r = gs.removeMoney(20);
+            if (r.ok) {
+              onMessage('A fresh notebook for class.');
+            } else {
+              onMessage('Not enough money.');
+            }
+          }),
+        ];
+      case 'supermarket':
+        return [
+          btn('Buy groceries ₱60', () {
+            final r = gs.removeMoney(60);
+            if (r.ok) {
+              gs.addItem('bread', 2);
+              onMessage('Groceries bagged. Check inventory.');
+            } else {
+              onMessage('Not enough money.');
+            }
+          }),
+          btn('Browse aisles', () {
+            gs.applyActivity('walk');
+            onMessage('Bright aisles and freezer hum.');
+          }),
+        ];
+      case 'pizzahut':
+        return [
+          btn('Eat pizza ₱70 (+10 energy)', () {
+            final r = gs.removeMoney(70);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            if (!gs.canDoActivity('eat')) {
+              gs.addMoney(70);
+              onMessage('Too exhausted to eat? Rest first! (refunded)');
+              return;
+            }
+            gs.eatMeal();
+            onMessage('Cheesy slice. Energy +10.');
+          }, enabled: gs.canDoActivity('eat')),
+        ];
+      case 'hospital':
+        return [
+          Text(
+            'Balance: ${gs.pesoBalance}',
+            style: const TextStyle(fontSize: 12),
+          ),
+          btn('Check-up ₱100 (+15 energy, 30m)', () {
+            final r = gs.removeMoney(100);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            gs.applyEnergy(15);
+            gs.advanceMinutes(30);
+            onMessage('All clear. Feeling much better. (+15 Energy)');
+          }),
+        ];
+      case 'restaurant':
+        return [
+          btn('Eat dinner ₱60 (+10 energy)', () {
+            final r = gs.removeMoney(60);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            if (!gs.canDoActivity('eat')) {
+              gs.addMoney(60);
+              onMessage('Too exhausted to eat? Rest first! (refunded)');
+              return;
+            }
+            gs.eatMeal();
+            onMessage('A warm dinner. Energy +10.');
+          }, enabled: gs.canDoActivity('eat')),
+        ];
+      case 'laundry':
+        return [
+          btn('Wash clothes ₱30 (30m)', () {
+            final r = gs.removeMoney(30);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            gs.advanceMinutes(30);
+            onMessage('Fresh and folded. (+Charm 1)');
+            gs.addCharm(1);
+          }),
+        ];
+      case 'police':
+        return [
+          btn('File a report (+Charm 1, 20m)', () {
+            gs.advanceMinutes(20);
+            gs.addCharm(1);
+            onMessage('Report filed. The officer thanks you. Charm +1.');
+          }),
+          btn('Check notice board', () {
+            onMessage('Lost pets, found bikes, event permits.');
+          }),
+        ];
+      case 'computer':
+        return [
+          btn('Internet hour ₱25 (+Int 1, 60m)', () {
+            final r = gs.removeMoney(25);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            gs.advanceMinutes(60);
+            gs.addIntelligence(1);
+            onMessage('Tutorials and typing drills. Intelligence +1.');
+          }),
+        ];
+      case 'amusement':
+        return [
+          btn('Roller coaster ₱50 (+Charm 1, 60m)', () {
+            final r = gs.removeMoney(50);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            gs.advanceMinutes(60);
+            gs.addCharm(1);
+            onMessage('What a rush! Charm +1.');
+          }),
+          btn('Midway games ₱20', () {
+            final r = gs.removeMoney(20);
+            if (r.ok) {
+              onMessage('So close! The giant plush stays on the shelf.');
+            } else {
+              onMessage('Not enough money.');
+            }
+          }),
+        ];
+      case 'beach':
+        return [
+          btn(
+            'Swim (+Str 1, 60m)',
+            () {
+              gs.applyActivity('exercise');
+              onMessage('Against the waves. Strength +1.');
+            },
+          ),
+          btn('Sunbathe (+Energy, 30m)', () => gs.applyActivity('rest')),
+        ];
+      case 'fishing':
+        return [
+          btn('Fish for an hour (+₱40 catch, 60m)', () {
+            gs.advanceMinutes(60);
+            gs.addMoney(40);
+            AudioService().coins();
+            onMessage('A decent catch! Sold for ₱40.');
+          }),
+        ];
+      case 'hotel':
+        return [
+          btn('Rest in the lobby ₱150 (+30 energy, 60m)', () {
+            final r = gs.removeMoney(150);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            gs.applyEnergy(30);
+            gs.advanceMinutes(60);
+            onMessage('Deep armchairs and quiet jazz. (+30 Energy)');
+          }),
         ];
       default:
         return [btn('Look around', () => gs.applyActivity('walk'))];

@@ -81,15 +81,12 @@ void main() {
       }
     });
 
-    test('the highway keeps buildings off the road', () {
+    test('the highways keep buildings off the road', () {
       for (final l in buildTownLocations()) {
-        final bottom = l.y + l.h;
-        final top = l.y;
-        final clearOfHighway = bottom <= kHighwayTop || top >= kHighwayBottom;
         expect(
-          clearOfHighway,
-          isTrue,
-          reason: '${l.id} overlaps the highway asphalt',
+          overlapsHighway(l.y, l.y + l.h),
+          isFalse,
+          reason: '${l.id} overlaps a highway asphalt',
         );
       }
     });
@@ -422,10 +419,10 @@ void main() {
       expect(nearest!.isSeat, isTrue);
       expect(nearest!.interactLabel, 'Sit on the bench');
 
-      // Stepping away again (onto the empty highway) drops the action.
+      // Stepping away again (onto the empty first highway) drops the action.
       game.player!.position = Vector2(
         bench.toRect().center.dx,
-        kHighwayTop + kHighwayHeight / 2,
+        kHighwayTops.first + kHighwayHeight / 2,
       );
       game.update(1 / 60);
       expect(nearest, isNot(same(bench)));
@@ -547,6 +544,136 @@ void main() {
       walker.update(1 / 60);
       walker.renderTree(canvas); // running
       recorder.endRecording();
+    });
+  });
+
+  group('extended south lots (bank, mall, atm)', () {
+    const extended = ['bank', 'mall'];
+
+    test('bank and mall face the highway below them', () {
+      final town = TownWorld(onNearestChanged: (_) {});
+      for (final id in extended) {
+        final b = town.buildings.firstWhere((e) => e.location.id == id);
+        expect(
+          b.location.doorOnTop,
+          isFalse,
+          reason: '$id door should face the highway below (band 4)',
+        );
+        // Door sits below H3 and above H4.
+        expect(b.doorPosition.y, greaterThan(1750));
+        expect(b.doorPosition.y, lessThan(2190));
+        expect(b.interactPosition, b.doorPosition);
+      }
+    });
+
+    test('new doorways are unblocked and off the road', () {
+      final town = TownWorld(onNearestChanged: (_) {});
+      const feet = FeetBody();
+      for (final id in extended) {
+        final spawn = town.doorSpawn(id);
+        final rect = feet.rectAt(spawn);
+        for (final solid in town.solidBounds()) {
+          expect(
+            rect.overlaps(solid.toRect()),
+            isFalse,
+            reason: '$id spawn blocked by ${solid.runtimeType}',
+          );
+        }
+        final door = town.buildings
+            .firstWhere((e) => e.location.id == id)
+            .doorPosition;
+        expect(door.y, greaterThan(1750));
+        expect(door.y, lessThan(2190));
+      }
+    });
+
+    test('new interiors have furniture and a menu point', () {
+      for (final id in extended) {
+        final layout = buildInterior(id);
+        expect(layout.id, id);
+        expect(layout.props, isNotEmpty);
+        expect(layout.props.any((p) => p.opensMenu), isTrue);
+        final scene = buildMiniMapScene(id);
+        expect(scene.title, layout.title);
+      }
+    });
+
+    test('atm prop offers Use ATM and is solid', () {
+      final atm = AtmProp(at: Vector2(1650, 1960));
+      expect(atm.interactId, 'use_atm');
+      expect(atm.interactLabel, 'Use ATM');
+      expect(atm.isSeat, isFalse);
+      expect(atm.touchRect.overlaps(atm.toRect()), isTrue);
+      // Rendering the kiosk must not throw.
+      final recorder = PictureRecorder();
+      final canvas = Canvas(recorder);
+      atm.renderTree(canvas);
+      recorder.endRecording();
+    });
+  });
+
+  group('extended districts (north row, west column, south row)', () {
+    const northRow = ['repair', 'bookstore', 'supermarket', 'pizzahut'];
+    const westColumn = ['hospital', 'restaurant', 'laundry'];
+    const southRow = ['computer', 'amusement', 'beach', 'fishing', 'hotel'];
+
+    test('outer lots face their streets and stay off the roads', () {
+      final town = TownWorld(onNearestChanged: (_) {});
+      for (final id in [...northRow, ...westColumn, ...southRow, 'police']) {
+        final b = town.buildings.firstWhere((e) => e.location.id == id);
+        // Door on the street side, horizontally centered.
+        final onTop = b.location.doorOnTop;
+        expect(
+          b.doorPosition.y,
+          closeTo(
+            onTop ? b.position.y : b.position.y + b.size.y,
+            0.001,
+          ),
+        );
+        expect(b.interactPosition, b.doorPosition);
+        // Every lot keeps clear of all highway asphalt.
+        expect(
+          overlapsHighway(b.location.y, b.location.y + b.location.h),
+          isFalse,
+          reason: '$id overlaps a highway',
+        );
+      }
+      // Bands 1–4 (plus police) face south; only band 5 faces north.
+      for (final id in [...northRow, ...westColumn, 'police']) {
+        final b = town.buildings.firstWhere((e) => e.location.id == id);
+        expect(b.location.doorOnTop, isFalse);
+      }
+      for (final id in southRow) {
+        final b = town.buildings.firstWhere((e) => e.location.id == id);
+        expect(b.location.doorOnTop, isTrue);
+      }
+    });
+
+    test('outer interiors have furniture and a menu point', () {
+      for (final id in [
+        ...northRow,
+        ...westColumn,
+        ...southRow,
+        'police',
+      ]) {
+        final layout = buildInterior(id);
+        expect(layout.id, id);
+        expect(layout.props, isNotEmpty);
+        expect(layout.props.any((p) => p.opensMenu), isTrue);
+        final scene = buildMiniMapScene(id);
+        expect(scene.title, layout.title);
+      }
+    });
+
+    test('town map shows every outer lot and doorway', () {
+      final scene = buildMiniMapScene(null);
+      for (final l in buildTownLocations()) {
+        expect(
+          scene.blocks.any((b) => b.rect == Rect.fromLTWH(l.x, l.y, l.w, l.h)),
+          isTrue,
+          reason: '${l.id} is missing from the town map',
+        );
+      }
     });
   });
 }

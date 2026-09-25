@@ -32,6 +32,9 @@ class LifeGame extends FlameGame {
   /// Defaults to a no-op so unit tests can construct LifeGame without it.
   final void Function() onSitDown;
 
+  /// Using the town ATM (wired in GameScreen, no-op in tests).
+  final void Function() onUseAtm;
+
   /// Randomness for the wandering townspeople (seed it in tests).
   final Random random;
 
@@ -67,8 +70,10 @@ class LifeGame extends FlameGame {
     required this.onTalkTo,
     required this.onMessage,
     void Function()? onSitDown,
+    void Function()? onUseAtm,
     Random? random,
   }) : onSitDown = onSitDown ?? (() {}),
+       onUseAtm = onUseAtm ?? (() {}),
        random = random ?? Random();
 
   LifeInteractContext get interactContext => LifeInteractContext(
@@ -77,6 +82,7 @@ class LifeGame extends FlameGame {
     openLocationMenu: onOpenLocationMenu,
     exitLocation: exitLocation,
     sitDown: onSitDown,
+    useAtm: onUseAtm,
     talkTo: onTalkTo,
     pickUp: onMessage,
   );

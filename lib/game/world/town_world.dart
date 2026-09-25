@@ -56,6 +56,12 @@ class TownWorld extends LifeWorld {
       add(b);
     }
 
+    // Standalone cash machine in band 4, on the grass between the bank
+    // (ends x1240) and the police station (starts x2120).
+    final atm = AtmProp(at: Vector2(1650, 1960));
+    _solids.add(atm);
+    add(atm);
+
     _spawnPedestrians();
 
     // Load custom lot sprites in the background: assigning the field later
@@ -270,43 +276,50 @@ class TownBackdrop extends PositionComponent {
     _paintSoftPlanting(canvas);
   }
 
-  /// Dashed centre lines, solid edge lines and a crosswalk at the junction.
+  /// Dashed centre lines, solid edge lines and crosswalks, repeated for
+  /// every highway that splits the town bands.
   void _paintLaneMarkings(Canvas canvas) {
     final dashes = Paint()..color = const Color(0xFFF2F2F2);
     const dashLength = 90.0;
     const gap = 70.0;
-    final centreY = kHighwayTop + kHighwayHeight / 2;
 
-    for (var x = 40.0; x < kWorldWidth - dashLength; x += dashLength + gap) {
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(x, centreY - 4, dashLength, 8),
-          const Radius.circular(4),
-        ),
-        dashes,
-      );
+    for (final top in kHighwayTops) {
+      final bottom = top + kHighwayHeight;
+      final centreY = top + kHighwayHeight / 2;
+
+      for (var x = 40.0; x < kWorldWidth - dashLength; x += dashLength + gap) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(x, centreY - 4, dashLength, 8),
+            const Radius.circular(4),
+          ),
+          dashes,
+        );
+      }
+
+      // Solid shoulders.
+      for (final y in [top + 12, bottom - 20]) {
+        canvas.drawRect(
+          Rect.fromLTWH(0, y, kWorldWidth, 6),
+          Paint()..color = const Color(0xFFEDEDED),
+        );
+      }
+
+      // Zebra crossing where the streets meet.
+      final crossing = Paint()..color = const Color(0xFFF2F2F2);
+      for (var x = kCrossStreetLeft + 14; x < kCrossStreetRight - 14; x += 34) {
+        canvas.drawRect(
+          Rect.fromLTWH(x, top + 6, 20, kHighwayHeight - 12),
+          crossing,
+        );
+      }
     }
 
-    // Solid shoulders.
-    for (final y in [kHighwayTop + 12, kHighwayBottom - 20]) {
-      canvas.drawRect(
-        Rect.fromLTWH(0, y, kWorldWidth, 6),
-        Paint()..color = const Color(0xFFEDEDED),
-      );
-    }
-
-    // Zebra crossing where the streets meet.
-    final crossing = Paint()..color = const Color(0xFFF2F2F2);
-    for (var x = kCrossStreetLeft + 14; x < kCrossStreetRight - 14; x += 34) {
-      canvas.drawRect(
-        Rect.fromLTWH(x, kHighwayTop + 6, 20, kHighwayHeight - 12),
-        crossing,
-      );
-    }
-
-    // Dashed centre line down the cross street.
+    // Dashed centre line down the cross street, pausing at each highway.
     for (var y = 40.0; y < kWorldHeight - dashLength; y += dashLength + gap) {
-      if (y > kHighwayTop - 40 && y < kHighwayBottom + 40) continue;
+      if (kHighwayTops.any((t) => y > t - 40 && y < t + kHighwayHeight + 40)) {
+        continue;
+      }
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromLTWH(
@@ -494,8 +507,99 @@ class StreetProp extends PositionComponent implements Interactable {
   }
 }
 
-class BuildingBlock extends RectangleComponent implements Interactable {
-  final LocationModel location;
+/// A standalone cash machine on the grass south of the sidewalk.
+/// Small solid footprint at its base; the kiosk body is drawn rising above
+/// it so it reads upright from the top-down camera.
+class AtmProp extends PositionComponent implements Interactable {
+  /// Ground contact point (centre of the base).
+  AtmProp({required Vector2 at})
+    : super(priority: 40, anchor: Anchor.topLeft) {
+    size = Vector2(56, 48);
+    position = Vector2(at.x - size.x / 2, at.y - size.y / 2);
+  }
+
+  @override
+  String get interactId => 'use_atm';
+
+  @override
+  String get interactLabel => 'Use ATM';
+
+  @override
+  bool get isSeat => false;
+
+  @override
+  Vector2 get interactPosition =>
+      Vector2(position.x + size.x / 2, position.y + size.y / 2);
+
+  @override
+  Rect get touchRect => toRect().inflate(28);
+
+  @override
+  Future<void> onInteract(LifeInteractContext ctx) async {
+    ctx.useAtm();
+  }
+
+  @override
+  void render(Canvas canvas) {
+    const bodyW = 64.0;
+    const bodyH = 104.0;
+    final left = (size.x - bodyW) / 2;
+    // Ground shadow.
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(size.x / 2, size.y - 4),
+        width: bodyW + 16,
+        height: 18,
+      ),
+      Paint()..color = const Color(0x33000000),
+    );
+    // Kiosk body rising above its footprint.
+    final bodyTop = size.y - 6 - bodyH;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left, bodyTop, bodyW, bodyH),
+        const Radius.circular(8),
+      ),
+      Paint()..color = const Color(0xFF3E5C76),
+    );
+    // Header sign.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left + 6, bodyTop + 6, bodyW - 12, 20),
+        const Radius.circular(5),
+      ),
+      Paint()..color = const Color(0xFF1D3557),
+    );
+    // Screen.
+    canvas.drawRect(
+      Rect.fromLTWH(left + 10, bodyTop + 34, bodyW - 20, 30),
+      Paint()..color = const Color(0xFFA8DADC),
+    );
+    // Keypad + cash slot.
+    canvas.drawRect(
+      Rect.fromLTWH(left + 10, bodyTop + 70, 20, 16),
+      Paint()..color = const Color(0xFFF1FAEE),
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(left + bodyW - 30, bodyTop + 70, 20, 8),
+      Paint()..color = const Color(0xFF1D3557),
+    );
+    // Label pinned under the kiosk.
+    canvas.save();
+    canvas.translate(0, size.y + 6);
+    drawCenteredLabel(
+      canvas,
+      Vector2(size.x, 28),
+      'ATM',
+      color: Colors.white,
+      fontSize: 20,
+      shadow: true,
+    );
+    canvas.restore();
+  }
+}
+
+class BuildingBlock extends RectangleComponent implements Interactable {  final LocationModel location;
   @override
   final String interactId;
   @override
@@ -649,8 +753,9 @@ class BuildingBlock extends RectangleComponent implements Interactable {
       canvas,
       Vector2(size.x, size.y * 0.6),
       location.name,
-      color: Colors.black87,
+      color: Colors.white,
       fontSize: 28,
+      shadow: true,
     );
   }
 }

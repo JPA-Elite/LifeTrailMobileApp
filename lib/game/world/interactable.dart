@@ -39,6 +39,9 @@ class LifeInteractContext {
   /// Sitting on a bench/pew/chair: rests and restores a bit of energy.
   final void Function() sitDown;
 
+  /// Using an ATM in the town: opens the withdraw dialog.
+  final void Function() useAtm;
+
   final void Function(String npcId) talkTo;
   final void Function(String itemId) pickUp;
 
@@ -48,6 +51,7 @@ class LifeInteractContext {
     required this.openLocationMenu,
     required this.exitLocation,
     required this.sitDown,
+    required this.useAtm,
     required this.talkTo,
     required this.pickUp,
   });
