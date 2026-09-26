@@ -10,7 +10,7 @@ import '../player/stick_figure.dart';
 /// [TownWorld], which repaths anyone who walks into an obstacle.
 class Pedestrian extends PositionComponent {
   static const int renderPriority = 40;
-  static const double kHeight = 84;
+  static const double kHeight = 72;
 
   final Random random;
   final Color shirt;

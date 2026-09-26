@@ -73,6 +73,10 @@ class LifeGame extends FlameGame {
   /// 0 = no active pinch target (zoom stays where it is).
   double _targetZoom = 0;
 
+  /// False while the user is free-looking (drag-panned away from the
+  /// player). Walking via the joystick snaps back to follow mode.
+  bool _followingPlayer = true;
+
   LifeGame({
     required this.onNearestChanged,
     required this.onEnterLocation,
@@ -169,6 +173,7 @@ class LifeGame extends FlameGame {
     hero.moveInput = Vector2.zero();
     await interior.add(hero);
     _applyCameraBounds(interior);
+    _followPlayer();
     _handleNearest(null);
     onMessage(layout.entryMessage);
     onEnterLocation(layout.id);
@@ -192,6 +197,7 @@ class LifeGame extends FlameGame {
     hero.moveInput = Vector2.zero();
     await townWorld.add(hero);
     _applyCameraBounds(townWorld);
+    _followPlayer();
     _handleNearest(null);
     onMessage(message);
     onLeftLocation(locationId);
@@ -254,6 +260,9 @@ class LifeGame extends FlameGame {
         camera.viewfinder.zoom = z + diff * (1 - pow(0.5, dt * 10));
       }
     }
+
+    // Joystick walk/run snaps a free-looked camera back onto the player.
+    if (hero != null && hero.isMoving) _followPlayer();
 
     final world = _activeWorld;
     if (!isLoaded || hero == null || world == null) return;
@@ -318,6 +327,28 @@ class LifeGame extends FlameGame {
 
   void setNightAlpha(double alpha) {
     nightAlpha = alpha.clamp(0.0, 0.55);
+  }
+
+  /// Drag-pan the view (single finger on the open map): stops following
+  /// the player so the user can explore. World bounds still clamp the
+  /// camera. Walking via the joystick resumes follow automatically.
+  void panBy(Offset screenDelta) {
+    if (!isLoaded) return;
+    if (_followingPlayer) {
+      _followingPlayer = false;
+      camera.stop();
+    }
+    camera.viewfinder.position -=
+        Vector2(screenDelta.dx, screenDelta.dy) / camera.viewfinder.zoom;
+  }
+
+  void _followPlayer() {
+    final hero = player;
+    if (hero == null || !isLoaded) return;
+    if (!_followingPlayer) {
+      _followingPlayer = true;
+      camera.follow(hero);
+    }
   }
 
   /// Called when two fingers land on the open map: anchors the smoothed

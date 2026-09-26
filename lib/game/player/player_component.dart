@@ -11,8 +11,8 @@ class PlayerComponent extends PositionComponent {
   final double walkSpeed = 220;
   final double runSpeed = 360;
 
-  static const double kWidth = 44;
-  static const double kHeight = 96;
+  static const double kWidth = 37;
+  static const double kHeight = 82;
 
   /// Render above the scene. Without this the player is drawn *before* a
   /// freshly loaded room's floor and walls (they are added later), which made

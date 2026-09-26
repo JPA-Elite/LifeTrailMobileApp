@@ -23,7 +23,11 @@ import '../models/quest_model.dart';
 class _TouchDown {
   Offset pos;
   final int timeMs;
-  _TouchDown(this.pos, this.timeMs);
+
+  /// True when the finger landed on the joystick corner: it steers the
+  /// player and must never pan the camera.
+  final bool joystick;
+  _TouchDown(this.pos, this.timeMs, {this.joystick = false});
 }
 
 class GameScreen extends ConsumerStatefulWidget {
@@ -65,12 +69,23 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   /// Both fingers must land within this window to count as one pinch.
   static const int _pinchTogetherMs = 500;
 
+  /// Joystick corner (bottom-left): drags starting here steer the
+  /// player and never pan the camera.
+  static const double _joyZoneW = 200;
+  static const double _joyZoneH = 240;
+
   bool _pinchActive = false;
+
+  bool _inJoystickZone(Offset pos) {
+    final h = MediaQuery.of(context).size.height;
+    return pos.dx < _joyZoneW && pos.dy > h - _joyZoneH;
+  }
 
   void _pinchDown(PointerDownEvent e) {
     _touches[e.pointer] = _TouchDown(
       e.position,
       DateTime.now().millisecondsSinceEpoch,
+      joystick: _inJoystickZone(e.position),
     );
     _pinchActive = false;
     if (_touches.length == 2) {
@@ -89,6 +104,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final touch = _touches[e.pointer];
     if (touch == null) return;
     touch.pos = e.position;
+    // Single free finger dragging the open map: pan the camera so the
+    // user can explore. Joystick drags are excluded.
+    if (_touches.length == 1 && !touch.joystick) {
+      _game?.panBy(e.delta);
+      return;
+    }
     if (_touches.length != 2 || !_pinchActive || _pinchBaseDist <= 0) return;
     final pts = _touches.values.toList();
     final d = (pts[0].pos - pts[1].pos).distance;
