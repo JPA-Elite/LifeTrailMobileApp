@@ -50,9 +50,43 @@ void main() {
     game.onGameResize(game.canvasSize);
     await tester.pump(const Duration(milliseconds: 100));
     expect(game.camera.viewfinder.zoom, closeTo(kept, 0.05));
+  });
 
-    // Single-finger drags never reach pinchZoomBy (GameScreen gates on
-    // exactly two pointers), so joystick movement can't affect zoom.
-    expect(game.camera.viewfinder.zoom, isNot(closeTo(base * 0.5, 0.01)));
+  testWidgets('town spawns visible moving traffic', (tester) async {
+    final game = LifeGame(
+      onNearestChanged: (_) {},
+      onEnterLocation: (_) {},
+      onOpenLocationMenu: (_) {},
+      onLeftLocation: (_) {},
+      onTalkTo: (_) {},
+      onMessage: (_) {},
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: GameWidget(game: game))),
+    );
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final town = game.town!;
+    expect(town.vehicles.length, greaterThanOrEqualTo(16));
+    expect(town.signals.length, 8);
+    final before = town.vehicles.map((v) => v.position.x).toList();
+    var everVisible = false;
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      final view = game.camera.visibleWorldRect;
+      if (town.vehicles.any((v) => view.contains(v.position.toOffset()))) {
+        everVisible = true;
+      }
+    }
+    final after = town.vehicles.map((v) => v.position.x).toList();
+    var moved = 0;
+    for (var i = 0; i < before.length; i++) {
+      if ((after[i] - before[i]).abs() > 1) moved++;
+    }
+    // Green-wave junctions must let most of the fleet roll, and at
+    // least one vehicle must actually cross the camera view.
+    expect(moved, greaterThan(town.vehicles.length ~/ 2));
+    expect(everVisible, isTrue);
   });
 }

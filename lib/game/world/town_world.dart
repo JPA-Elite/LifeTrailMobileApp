@@ -9,10 +9,11 @@ import 'interactable.dart';
 import 'life_world.dart';
 import 'map_data.dart';
 import 'pedestrian.dart';
+import 'vehicle.dart';
 import 'interior_world.dart' show drawCenteredLabel;
 import '../../models/location_dialogue.dart';
 
-class TownWorld extends LifeWorld {
+class TownWorld extends LifeWorld implements TrafficHost {
   final void Function(Interactable?) onNearestChanged;
   final Random random;
 
@@ -21,6 +22,15 @@ class TownWorld extends LifeWorld {
   final List<Pedestrian> pedestrians = [];
   final List<PositionComponent> _solids = [];
   late final List<Rect> _walkBands = buildPedestrianBands();
+
+  /// Live traffic: staggered signals, cars and bicycles per highway.
+  late final TrafficSystem traffic = TrafficSystem();
+  final List<VehicleComponent> vehicles = [];
+  final List<TrafficLightProp> signals = [];
+
+  /// Player position fed in by LifeGame each frame (null inside rooms).
+  /// Cars treat a player standing on a zebra crossing as a red light.
+  Vector2? playerPosition;
 
   TownWorld({required this.onNearestChanged, Random? random})
     : random = random ?? Random() {
@@ -70,6 +80,7 @@ class TownWorld extends LifeWorld {
     add(atm);
 
     _spawnPedestrians();
+    _spawnTraffic();
 
     // Load custom lot sprites in the background: assigning the field later
     // is safe (no mount lifecycle involved), and gameplay / collision must
@@ -174,6 +185,12 @@ class TownWorld extends LifeWorld {
     super.updateTree(dt);
     if (!isMounted) return;
 
+    // Advance the signal cycle; vehicles read phases in their own update.
+    traffic.update(dt);
+
+    // Enforce bumper separation after every vehicle has moved.
+    _separateTraffic();
+
     final bands = _walkBands;
     for (final walker in pedestrians) {
       final blocked = resolveFeetCollision(
@@ -215,6 +232,187 @@ class TownWorld extends LifeWorld {
       }
     }
     return best;
+  }
+
+  // --- TrafficHost ----------------------------------------------------------
+
+  @override
+  LightPhase phaseAtJunction(int index) => traffic.phaseAt(index);
+
+  /// True while the player stands on junction [index]'s zebra crossing:
+  /// approaching vehicles treat it as a red light and halt.
+  @override
+  bool crossingBlocked(int index) {
+    final p = playerPosition;
+    if (p == null || index < 0 || index >= kHighwayTops.length) return false;
+    final top = kHighwayTops[index];
+    return p.x > kCrossStreetLeft - 12 &&
+        p.x < kCrossStreetRight + 12 &&
+        p.y > top - 6 &&
+        p.y < top + kHighwayHeight + 6;
+  }
+
+  /// Bumper-to-bumper gap to the nearest vehicle ahead in the same lane,
+  /// or null when the road ahead is clear.
+  @override
+  double? gapAhead(VehicleComponent self) {
+    final lead = _leaderAhead(self);
+    if (lead == null) return null;
+    return (lead.position.x - self.position.x) * self.dir -
+        lead.halfLen -
+        self.halfLen;
+  }
+
+  @override
+  double? speedAhead(VehicleComponent self) => _leaderAhead(self)?.speed;
+
+  VehicleComponent? _leaderAhead(VehicleComponent self) {
+    VehicleComponent? best;
+    var bestDist = double.infinity;
+    for (final v in vehicles) {
+      if (identical(v, self)) continue;
+      if (v.highwayTop != self.highwayTop || v.dir != self.dir) continue;
+      final d = (v.position.x - self.position.x) * self.dir;
+      if (d > -10 && d < bestDist) {
+        bestDist = d;
+        best = v;
+      }
+    }
+    return best;
+  }
+
+  /// Distance from [self]'s front bumper to the nearest player or
+  /// pedestrian ahead in its lane (null when clear). Wanderers stick to
+  /// sidewalks, so this only fires for genuine crossings/jaywalking —
+  /// one lane yields, the rest of the town keeps rolling.
+  @override
+  double? pedestrianAhead(VehicleComponent self) {
+    double? best;
+    void consider(Vector2 p) {
+      // Lane bodies are 80px tall with 52px cars inside: 30px keeps
+      // sidewalk walkers (44px+ from center) flowing while anything
+      // actually on the asphalt yields.
+      if ((p.y - self.position.y).abs() > 30) return;
+      final d =
+          (p.x - self.position.x) * self.dir - self.halfLen;
+      if (d > -6 && d < 300 && (best == null || d < best!)) best = d;
+    }
+
+    final pp = playerPosition;
+    if (pp != null) consider(pp);
+    for (final w in pedestrians) {
+      consider(w.position);
+    }
+    return best;
+  }
+
+  /// Hard separation guarantee: after vehicles move, walk each lane
+  /// front-to-back and push any overlapping rear bumper back. Visual
+  /// overlap becomes impossible even across spawns and wrap-arounds.
+  void _separateTraffic() {
+    const minGap = 26.0;
+    for (final top in kHighwayTops) {
+      for (final dir in const [1, -1]) {
+        // Front of the lane first: largest x eastbound, smallest west.
+        final lane = [
+          for (final v in vehicles)
+            if (v.highwayTop == top && v.dir == dir) v,
+        ]..sort((a, b) => dir > 0
+            ? b.position.x.compareTo(a.position.x)
+            : a.position.x.compareTo(b.position.x));
+        for (var i = 1; i < lane.length; i++) {
+          final front = lane[i - 1];
+          final rear = lane[i];
+          final gap = (front.position.x - rear.position.x) * dir -
+              front.halfLen -
+              rear.halfLen;
+          if (gap < minGap) {
+            rear.position.x =
+                front.position.x - dir * (front.halfLen + rear.halfLen + minGap);
+            if (rear.speed > front.speed) rear.speed = front.speed;
+          }
+        }
+      }
+    }
+  }
+
+  /// Two signals (diagonal corners) per junction plus cars and a bicycle
+  /// on every highway, spread out so nothing starts piled at a light.
+  void _spawnTraffic() {
+    const carColors = [
+      Color(0xFFCC4125),
+      Color(0xFF4A86E8),
+      Color(0xFFBDC3C7),
+      Color(0xFF1F1A17),
+      Color(0xFFFFD966),
+      Color(0xFF8E7CC3),
+    ];
+    for (var j = 0; j < kHighwayTops.length; j++) {
+      final top = kHighwayTops[j];
+      final bottom = top + kHighwayHeight;
+      signals.add(
+        TrafficLightProp(
+          host: this,
+          junction: j,
+          at: Vector2(kCrossStreetRight + 26, top - 30),
+        ),
+      );
+      signals.add(
+        TrafficLightProp(
+          host: this,
+          junction: j,
+          at: Vector2(kCrossStreetLeft - 26, bottom + 34),
+        ),
+      );
+      for (final dir in const [1, -1]) {
+        // Deterministic slots spread down the lane: nobody spawns
+        // piled up or overlapping, whatever the seed.
+        for (var k = 0; k < 2; k++) {
+          final x = kWorldWidth * (0.18 + 0.42 * k) +
+              (random.nextDouble() - 0.5) * 240;
+          vehicles.add(
+            VehicleComponent(
+              host: this,
+              kind: VehicleKind.car,
+              highwayTop: top,
+              junction: j,
+              dir: dir,
+              spawn: Vector2(
+                x.clamp(120.0, kWorldWidth - 120),
+                laneCenterY(top, dir),
+              ),
+              cruiseSpeed: 240 + random.nextDouble() * 90,
+              color: carColors[(j * 2 + (dir > 0 ? k : k + 1)) %
+                  carColors.length],
+            ),
+          );
+        }
+        if (j.isEven == (dir > 0)) {
+          vehicles.add(
+            VehicleComponent(
+              host: this,
+              kind: VehicleKind.bicycle,
+              highwayTop: top,
+              junction: j,
+              dir: dir,
+              spawn: Vector2(
+                (kWorldWidth * 0.82 + (random.nextDouble() - 0.5) * 200)
+                    .clamp(120.0, kWorldWidth - 120),
+                laneCenterY(top, dir) + (dir > 0 ? 22 : -22),
+              ),
+              cruiseSpeed: 100 + random.nextDouble() * 40,
+              color: const Color(0xFFE69138),
+            ),
+          );
+        }
+      }
+    }
+    for (final s in signals) {
+      add(s);
+    }
+    for (final v in vehicles) {
+      add(v);
+    }
   }
 }
 
@@ -358,6 +556,18 @@ class TownBackdrop extends PositionComponent {
           crossing,
         );
       }
+
+      // Stop lines: where each lane halts for red lights / pedestrians.
+      final stopPaint = Paint()
+        ..color = const Color(0xFFF2F2F2).withValues(alpha: 0.85);
+      canvas.drawRect(
+        Rect.fromLTWH(stopLineX(1) - 5, top + 10, 10, 60),
+        stopPaint,
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(stopLineX(-1) - 5, top + 90, 10, 60),
+        stopPaint,
+      );
     }
 
     // Dashed centre line down the cross street, pausing at each highway.

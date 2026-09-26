@@ -50,6 +50,17 @@ const double kCrossStreetLeft = 2780;
 const double kCrossStreetWidth = 200;
 const double kCrossStreetRight = kCrossStreetLeft + kCrossStreetWidth;
 
+// --- Traffic lanes ----------------------------------------------------------
+
+/// Each highway carries two lanes: eastbound (+1) on the north half,
+/// westbound (-1) on the south half.
+double laneCenterY(double highwayTop, int dir) =>
+    dir > 0 ? highwayTop + 40 : highwayTop + 120;
+
+/// X of the stop line a [dir] vehicle must halt behind at the junction.
+double stopLineX(int dir) =>
+    dir > 0 ? kCrossStreetLeft - 46 : kCrossStreetRight + 46;
+
 // --- Streets --------------------------------------------------------------
 
 class TownStrip {

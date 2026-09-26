@@ -77,6 +77,11 @@ class LifeGame extends FlameGame {
   /// player). Walking via the joystick glides smoothly back to follow.
   bool _followingPlayer = true;
 
+  /// Pending pan distance (world units). Drag events accumulate here;
+  /// update() glides through it each frame so free-look moves smoothly
+  /// instead of jumping with every raw touch event.
+  Vector2 _pendingPan = Vector2.zero();
+
   /// True while the camera is animating home after free-look. Follow
   /// stays off until the glide converges, so there is never a snap.
   bool _snappingBack = false;
@@ -171,6 +176,7 @@ class LifeGame extends FlameGame {
     _activeWorld = interior;
     miniMapScene.value = buildMiniMapScene(layout.id);
     world = interior;
+    town?.playerPosition = null;
     // Move the figure into the room first so it never renders for a frame at
     // its old town coordinates.
     hero.position = interior.entrySpawn;
@@ -265,6 +271,16 @@ class LifeGame extends FlameGame {
       }
     }
 
+    // Glide through the pending drag distance (~14/s): free-look
+    // moves smoothly even when touch events arrive in bursts.
+    // Skipped while snapping home so the two motions never fight.
+    if (!_snappingBack &&
+        (_pendingPan.x.abs() > 0.05 || _pendingPan.y.abs() > 0.05)) {
+      final step = _pendingPan * (1 - pow(0.5, dt * 14)).toDouble();
+      camera.viewfinder.position += step;
+      _pendingPan -= step;
+    }
+
     // Joystick walk/run glides a free-looked camera back onto the
     // player instead of snapping.
     if (hero != null && hero.isMoving) _followPlayer();
@@ -285,6 +301,9 @@ class LifeGame extends FlameGame {
 
     // Report the position for the minimap (no rebuild while standing still).
     playerMapPosition.value = Vector2(hero.position.x, hero.position.y);
+
+    // Feed the town's traffic: cars halt when the player is on a zebra.
+    if (world == town) town?.playerPosition = hero.position;
 
     // Keep the figure inside the current scene.
     final bounds = world.worldSize;
@@ -347,6 +366,7 @@ class LifeGame extends FlameGame {
 
   /// Drag-pan the view (single finger on the open map): stops following
   /// the player so the user can explore. Cancels any snap-back glide.
+  /// The distance accumulates and update() glides through it smoothly.
   /// World bounds still clamp the camera. Walking via the joystick
   /// glides smoothly back to the player.
   void panBy(Offset screenDelta) {
@@ -356,8 +376,8 @@ class LifeGame extends FlameGame {
       _followingPlayer = false;
       camera.stop();
     }
-    camera.viewfinder.position -=
-        Vector2(screenDelta.dx, screenDelta.dy) / camera.viewfinder.zoom;
+    _pendingPan +=
+        Vector2(-screenDelta.dx, -screenDelta.dy) / camera.viewfinder.zoom;
   }
 
   void _followPlayer({bool instant = false}) {
@@ -370,7 +390,11 @@ class LifeGame extends FlameGame {
       return;
     }
     // Animated: glide home in update(), engage follow on arrival.
-    if (!_followingPlayer) _snappingBack = true;
+    // Leftover drag distance is dropped so it can't fight the glide.
+    if (!_followingPlayer) {
+      _pendingPan = Vector2.zero();
+      _snappingBack = true;
+    }
   }
 
   /// Called when two fingers land on the open map: anchors the smoothed
