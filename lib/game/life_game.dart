@@ -74,8 +74,12 @@ class LifeGame extends FlameGame {
   double _targetZoom = 0;
 
   /// False while the user is free-looking (drag-panned away from the
-  /// player). Walking via the joystick snaps back to follow mode.
+  /// player). Walking via the joystick glides smoothly back to follow.
   bool _followingPlayer = true;
+
+  /// True while the camera is animating home after free-look. Follow
+  /// stays off until the glide converges, so there is never a snap.
+  bool _snappingBack = false;
 
   LifeGame({
     required this.onNearestChanged,
@@ -173,7 +177,7 @@ class LifeGame extends FlameGame {
     hero.moveInput = Vector2.zero();
     await interior.add(hero);
     _applyCameraBounds(interior);
-    _followPlayer();
+    _followPlayer(instant: true);
     _handleNearest(null);
     onMessage(layout.entryMessage);
     onEnterLocation(layout.id);
@@ -197,7 +201,7 @@ class LifeGame extends FlameGame {
     hero.moveInput = Vector2.zero();
     await townWorld.add(hero);
     _applyCameraBounds(townWorld);
-    _followPlayer();
+    _followPlayer(instant: true);
     _handleNearest(null);
     onMessage(message);
     onLeftLocation(locationId);
@@ -261,8 +265,20 @@ class LifeGame extends FlameGame {
       }
     }
 
-    // Joystick walk/run snaps a free-looked camera back onto the player.
+    // Joystick walk/run glides a free-looked camera back onto the
+    // player instead of snapping.
     if (hero != null && hero.isMoving) _followPlayer();
+    if (_snappingBack && hero != null) {
+      final toPlayer = hero.position - camera.viewfinder.position;
+      if (toPlayer.length < 3) {
+        _snappingBack = false;
+        _followingPlayer = true;
+        camera.follow(hero);
+      } else {
+        camera.viewfinder.position +=
+            toPlayer * (1 - pow(0.5, dt * 6)).toDouble();
+      }
+    }
 
     final world = _activeWorld;
     if (!isLoaded || hero == null || world == null) return;
@@ -330,10 +346,12 @@ class LifeGame extends FlameGame {
   }
 
   /// Drag-pan the view (single finger on the open map): stops following
-  /// the player so the user can explore. World bounds still clamp the
-  /// camera. Walking via the joystick resumes follow automatically.
+  /// the player so the user can explore. Cancels any snap-back glide.
+  /// World bounds still clamp the camera. Walking via the joystick
+  /// glides smoothly back to the player.
   void panBy(Offset screenDelta) {
     if (!isLoaded) return;
+    _snappingBack = false;
     if (_followingPlayer) {
       _followingPlayer = false;
       camera.stop();
@@ -342,13 +360,17 @@ class LifeGame extends FlameGame {
         Vector2(screenDelta.dx, screenDelta.dy) / camera.viewfinder.zoom;
   }
 
-  void _followPlayer() {
+  void _followPlayer({bool instant = false}) {
     final hero = player;
     if (hero == null || !isLoaded) return;
-    if (!_followingPlayer) {
+    if (instant) {
+      _snappingBack = false;
       _followingPlayer = true;
       camera.follow(hero);
+      return;
     }
+    // Animated: glide home in update(), engage follow on arrival.
+    if (!_followingPlayer) _snappingBack = true;
   }
 
   /// Called when two fingers land on the open map: anchors the smoothed
