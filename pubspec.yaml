@@ -24,12 +24,28 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/home.png
+    - assets/images/atm.png
     - assets/images/tree.png
     - assets/images/grass_tile.png
     - assets/images/plaza.jpg
     - assets/images/cafe.png
     - assets/images/church.png
     - assets/images/school.png
+    - assets/images/repair.png
+    - assets/images/bookstore.png
+    - assets/images/supermarket.png
+    - assets/images/pizzahut.png
+    - assets/images/hospital.png
+    - assets/images/restaurant.png
+    - assets/images/laundry.png
+    - assets/images/bank.png
+    - assets/images/mall.png
+    - assets/images/police.png
+    - assets/images/computer.png
+    - assets/images/amusement.png
+    - assets/images/beach.png
+    - assets/images/fishing.png
+    - assets/images/hotel.png
     - assets/images/park.png
     - assets/data/npcs/
     - assets/data/quests/

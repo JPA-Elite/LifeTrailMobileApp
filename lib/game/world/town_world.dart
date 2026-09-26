@@ -78,6 +78,7 @@ class TownWorld extends LifeWorld implements TrafficHost {
     final atm = AtmProp(at: Vector2(1650, 1960));
     _solids.add(atm);
     add(atm);
+    _loadAtmSprite(atm);
 
     _spawnPedestrians();
     _spawnTraffic();
@@ -93,6 +94,21 @@ class TownWorld extends LifeWorld implements TrafficHost {
     _loadLotSprite('church.png', 'church', labelColor: Colors.white);
     _loadLotSprite('park.png', 'park', labelColor: Colors.white);
     _loadLotSprite('cafe.png', 'workplace', labelColor: Colors.white);
+    _loadLotSprite('repair.png', 'repair', labelColor: Colors.white);
+    _loadLotSprite('bookstore.png', 'bookstore', labelColor: Colors.white);
+    _loadLotSprite('supermarket.png', 'supermarket', labelColor: Colors.white);
+    _loadLotSprite('pizzahut.png', 'pizzahut', labelColor: Colors.white);
+    _loadLotSprite('hospital.png', 'hospital', labelColor: Colors.white);
+    _loadLotSprite('restaurant.png', 'restaurant', labelColor: Colors.white);
+    _loadLotSprite('laundry.png', 'laundry', labelColor: Colors.white);
+    _loadLotSprite('bank.png', 'bank', labelColor: Colors.white);
+    _loadLotSprite('mall.png', 'mall', labelColor: Colors.white);
+    _loadLotSprite('police.png', 'police', labelColor: Colors.white);
+    _loadLotSprite('computer.png', 'computer', labelColor: Colors.white);
+    _loadLotSprite('amusement.png', 'amusement', labelColor: Colors.white);
+    _loadLotSprite('beach.png', 'beach', labelColor: Colors.white);
+    _loadLotSprite('fishing.png', 'fishing', labelColor: Colors.white);
+    _loadLotSprite('hotel.png', 'hotel', labelColor: Colors.white);
     _loadTreeSprite();
   }
 
@@ -119,6 +135,11 @@ class TownWorld extends LifeWorld implements TrafficHost {
         if (prop.decoration.kind == 'tree') prop.setTreeSprite(sprite);
       }
     }).catchError((_) {});
+  }
+
+  /// Loads atm.png in the background for the standalone cash machine.
+  void _loadAtmSprite(AtmProp atm) {
+    Sprite.load('atm.png').then(atm.setBoothSprite).catchError((_) {});
   }
 
   /// A handful of townspeople wandering the sidewalks on their own routes.
@@ -832,6 +853,14 @@ class AtmProp extends PositionComponent implements Interactable {
     position = Vector2(at.x - size.x / 2, at.y - size.y / 2);
   }
 
+  /// Custom booth art (atm.png), assigned in the background by TownWorld.
+  /// Falls back to the procedural kiosk until it arrives.
+  Sprite? _boothSprite;
+
+  void setBoothSprite(Sprite sprite) {
+    _boothSprite = sprite;
+  }
+
   @override
   String get interactId => 'use_atm';
 
@@ -855,6 +884,31 @@ class AtmProp extends PositionComponent implements Interactable {
 
   @override
   void render(Canvas canvas) {
+    final booth = _boothSprite;
+    if (booth != null) {
+      // Bottom-center anchored booth rising above the small footprint.
+      final src = booth.srcSize;
+      const drawW = 132.0;
+      final drawH = drawW * src.y / src.x;
+      booth.render(
+        canvas,
+        position: Vector2((size.x - drawW) / 2, size.y - drawH),
+        size: Vector2(drawW, drawH),
+      );
+      // Label pinned under the booth.
+      canvas.save();
+      canvas.translate(0, size.y + 6);
+      drawCenteredLabel(
+        canvas,
+        Vector2(size.x, 28),
+        'ATM',
+        color: Colors.white,
+        fontSize: 20,
+        shadow: true,
+      );
+      canvas.restore();
+      return;
+    }
     const bodyW = 64.0;
     const bodyH = 104.0;
     final left = (size.x - bodyW) / 2;
