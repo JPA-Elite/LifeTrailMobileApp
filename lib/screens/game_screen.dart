@@ -12,6 +12,7 @@ import '../game/world/mini_map_scene.dart';
 import '../services/game_data_service.dart';
 import '../services/save_service.dart';
 import '../services/audio_service.dart';
+import 'atm_screen.dart';
 import '../game/world/map_data.dart';
 import '../widgets/game_hud.dart';
 import '../widgets/action_buttons.dart';
@@ -389,64 +390,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   void _openAtm() {
-    final gs = ref.read(gameStateProvider);
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        backgroundColor: const Color(0xFFFBF7EC),
-        titleTextStyle: const TextStyle(
-          color: Color(0xFF1A1D21),
-          fontWeight: FontWeight.bold,
-          fontSize: 18,
-        ),
-        contentTextStyle: const TextStyle(
-          color: Color(0xFF1A1D21),
-          fontSize: 14,
-        ),
-        title: const Text('ATM'),
-        content: Text('Balance: ${gs.pesoBalance}\nWithdraw cash? (takes 5m)'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              gs.addMoney(200);
-              gs.advanceMinutes(5);
-              AudioService().coins();
-              Navigator.of(ctx).pop();
-              _flashMessage(
-                'Withdrew ₱200. Balance: ${gs.pesoBalance}',
-                seconds: 4,
-              );
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D5B),
-            ),
-            child: const Text('₱200'),
-          ),
-          FilledButton(
-            onPressed: () {
-              gs.addMoney(500);
-              gs.advanceMinutes(5);
-              AudioService().coins();
-              Navigator.of(ctx).pop();
-              _flashMessage(
-                'Withdrew ₱500. Balance: ${gs.pesoBalance}',
-                seconds: 4,
-              );
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D5B),
-            ),
-            child: const Text('₱500'),
-          ),
-        ],
-      ),
+      builder: (_) => const Dialog.fullscreen(child: AtmScreen()),
     );
   }
 

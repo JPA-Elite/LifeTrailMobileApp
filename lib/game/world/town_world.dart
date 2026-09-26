@@ -402,7 +402,7 @@ class TownWorld extends LifeWorld implements TrafficHost {
                 x.clamp(120.0, kWorldWidth - 120),
                 laneCenterY(top, dir),
               ),
-              cruiseSpeed: 240 + random.nextDouble() * 90,
+              cruiseSpeed: 170 + random.nextDouble() * 50,
               color: carColors[(j * 2 + (dir > 0 ? k : k + 1)) %
                   carColors.length],
             ),
@@ -421,7 +421,7 @@ class TownWorld extends LifeWorld implements TrafficHost {
                     .clamp(120.0, kWorldWidth - 120),
                 laneCenterY(top, dir) + (dir > 0 ? 22 : -22),
               ),
-              cruiseSpeed: 100 + random.nextDouble() * 40,
+              cruiseSpeed: 90 + random.nextDouble() * 30,
               color: const Color(0xFFE69138),
             ),
           );
@@ -448,6 +448,7 @@ class TownBackdrop extends PositionComponent {
       );
 
   static final List<TownStrip> _roads = buildTownRoads();
+  static final List<LocationModel> _lots = buildTownLocations();
   static final List<TownDecoration> _planting = [
     for (final d in buildTownDecorations())
       if (!d.solid &&
@@ -532,6 +533,11 @@ class TownBackdrop extends PositionComponent {
       );
     }
 
+    // Driveways: paved aprons from each door to the street so lots
+    // merge into the ground. Drawn before roads so asphalt overlays
+    // the far end like a real curb cut.
+    _paintDriveways(canvas);
+
     // Roads and sidewalks.
     for (final strip in _roads) {
       canvas.drawRect(
@@ -542,6 +548,36 @@ class TownBackdrop extends PositionComponent {
 
     _paintLaneMarkings(canvas);
     _paintSoftPlanting(canvas);
+  }
+
+  /// A concrete apron from every building's doorway toward the nearest
+  /// street. Same footprint logic as doors/spawns, so pavement always
+  /// lines up with where the player walks in.
+  void _paintDriveways(Canvas canvas) {
+    const width = 132.0;
+    const reach = 150.0;
+    // Same asphalt as the highways so lots read as connected road.
+    final fill = Paint()..color = const Color(0xFF4A4A4A);
+    final edge = Paint()..color = const Color(0xFF3A3A3A);
+    for (final lot in _lots) {
+      final doorX = lot.x + lot.w / 2;
+      final rect = lot.doorOnTop
+          ? Rect.fromLTWH(doorX - width / 2, lot.y - reach, width, reach + 6)
+          : Rect.fromLTWH(doorX - width / 2, lot.y + lot.h - 6, width, reach + 6);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+        fill,
+      );
+      // Darker wheel tracks for a worn, driven-on look.
+      canvas.drawRect(
+        Rect.fromLTWH(rect.left + 18, rect.top, 16, rect.height),
+        edge,
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(rect.right - 34, rect.top, 16, rect.height),
+        edge,
+      );
+    }
   }
 
   /// Dashed centre lines, solid edge lines and crosswalks, repeated for

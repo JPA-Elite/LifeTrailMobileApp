@@ -307,4 +307,57 @@ class GameState extends ChangeNotifier {
   }
 
   String get pesoBalance => '₱${player.money}';
+
+  // --- ATM ---------------------------------------------------------------
+  // Bank balance + PIN live in flags so they persist through the existing
+  // save format with zero migration. Default PIN is 000000.
+
+  static const String defaultAtmPin = '000000';
+  static const int atmPinLength = 6;
+
+  int get bankBalance => flags['bank_balance'] ?? 2000;
+
+  String get bankPesoBalance => '₱$bankBalance';
+
+  String get atmPin =>
+      (flags['atm_pin'] ?? 0).toString().padLeft(atmPinLength, '0');
+
+  bool verifyAtmPin(String pin) => pin == atmPin;
+
+  MoneyResult atmWithdraw(int amount) {
+    if (amount <= 0) return const MoneyResult(false, 'Enter an amount.');
+    if (amount > bankBalance) {
+      return const MoneyResult(false, 'Insufficient bank balance.');
+    }
+    flags['bank_balance'] = bankBalance - amount;
+    addMoney(amount);
+    advanceMinutes(5);
+    return const MoneyResult(true);
+  }
+
+  MoneyResult atmDeposit(int amount) {
+    if (amount <= 0) return const MoneyResult(false, 'Enter an amount.');
+    final check = MoneySystem.canAfford(player.money, amount);
+    if (!check.ok) return const MoneyResult(false, 'Not enough cash.');
+    player = player.copyWith(money: player.money - amount);
+    flags['bank_balance'] = bankBalance + amount;
+    advanceMinutes(5);
+    notifyListeners();
+    return const MoneyResult(true);
+  }
+
+  MoneyResult atmChangePin(String currentPin, String newPin) {
+    if (!verifyAtmPin(currentPin)) {
+      return const MoneyResult(false, 'Current PIN is wrong.');
+    }
+    if (newPin.length != atmPinLength || int.tryParse(newPin) == null) {
+      return const MoneyResult(false, 'New PIN must be 6 digits.');
+    }
+    if (newPin == currentPin) {
+      return const MoneyResult(false, 'New PIN matches the old one.');
+    }
+    flags['atm_pin'] = int.parse(newPin);
+    notifyListeners();
+    return const MoneyResult(true);
+  }
 }

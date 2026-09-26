@@ -9,7 +9,7 @@ class PlayerComponent extends PositionComponent {
   Vector2 moveInput = Vector2.zero();
   bool running = false;
   final double walkSpeed = 220;
-  final double runSpeed = 360;
+  final double runSpeed = 330;
 
   static const double kWidth = 37;
   static const double kHeight = 82;
