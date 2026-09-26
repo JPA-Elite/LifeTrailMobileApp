@@ -24,11 +24,13 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/home.png
+    - assets/images/tree.png
+    - assets/images/grass_tile.png
     - assets/images/plaza.jpg
     - assets/images/cafe.png
     - assets/images/church.png
-    - assets/images/school.jpg
-    - assets/images/park.jpg
+    - assets/images/school.png
+    - assets/images/park.png
     - assets/data/npcs/
     - assets/data/quests/
     - assets/data/items/

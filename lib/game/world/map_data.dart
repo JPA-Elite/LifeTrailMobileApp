@@ -8,9 +8,10 @@ const double kWorldHeight = 2900;
 // --- Highways -------------------------------------------------------------
 
 /// Five parallel town bands, each split by its own east-west highway.
+/// 3rd-row grass enlarged: highways 3+4 pushed down 60px.
 const double kHighwayHeight = 160;
 const double kSidewalkHeight = 46;
-const List<double> kHighwayTops = [430, 990, 1590, 2190];
+const List<double> kHighwayTops = [430, 990, 1650, 2250];
 
 /// Bottom edge of the highway starting at [top].
 double highwayBottom(double top) => top + kHighwayHeight;
@@ -18,6 +19,31 @@ double highwayBottom(double top) => top + kHighwayHeight;
 /// True when the vertical span [top, bottom] touches any highway asphalt.
 bool overlapsHighway(double top, double bottom) =>
     kHighwayTops.any((t) => top < t + kHighwayHeight && bottom > t);
+
+/// True when [y] sits on highway asphalt itself (not sidewalks/grass).
+/// Lamps use this: sidewalk edge is fine, middle of the road is not.
+bool isOnAsphalt(double y) => kHighwayTops.any(
+  (t) => y >= t && y <= t + kHighwayHeight,
+);
+
+/// True when [x] sits on the vertical cross-street asphalt.
+bool isOnCrossStreet(double x, {double margin = 0}) =>
+    x >= kCrossStreetLeft - margin && x <= kCrossStreetRight + margin;
+
+/// True when the point is on any road asphalt: horizontal highways or
+/// the vertical crossing street. This is what must stay clear so props
+/// never sit centered on a junction and block the way.
+bool isOnAnyAsphalt(double x, double y) =>
+    isOnAsphalt(y) || isOnCrossStreet(x);
+
+/// True when [y] is on highway asphalt or its sidewalks (with a small
+/// safety margin so tall props like lamp glows / tree canopies never
+/// visually bleed onto the road either).
+bool decorationOnRoad(double y, {double margin = 24}) => kHighwayTops.any(
+  (t) =>
+      y > t - kSidewalkHeight - margin &&
+      y < t + kHighwayHeight + kSidewalkHeight + margin,
+);
 
 /// North-south street crossing every highway.
 const double kCrossStreetLeft = 2780;
@@ -133,16 +159,16 @@ List<LocationModel> buildTownLocations() => [
     id: 'restaurant',
     name: 'Restaurant',
     x: 60,
-    y: 1210,
+    y: 1205,
     w: 440,
-    h: 240,
+    h: 260,
     color: 0xFFE69138,
   ),
   const LocationModel(
     id: 'laundry',
     name: 'Laundry Shop',
     x: 60,
-    y: 1810,
+    y: 1870,
     w: 440,
     h: 280,
     color: 0xFF6FA8DC,
@@ -180,7 +206,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'home',
     name: 'Home',
     x: 1340,
-    y: 1210,
+    y: 1260,
     w: 440,
     h: 280,
     color: 0xFFE6B8AF,
@@ -190,9 +216,9 @@ List<LocationModel> buildTownLocations() => [
     id: 'plaza',
     name: 'Plaza',
     x: 2120,
-    y: 1210,
+    y: 1205,
     w: 460,
-    h: 320,
+    h: 335,
     color: 0xFF93C47D,
     doorSide: 'top',
   ),
@@ -200,9 +226,9 @@ List<LocationModel> buildTownLocations() => [
     id: 'workplace',
     name: 'Café',
     x: 3220,
-    y: 1210,
+    y: 1205,
     w: 600,
-    h: 320,
+    h: 335,
     color: 0xFFFFD966,
     doorSide: 'top',
   ),
@@ -211,7 +237,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'bank',
     name: 'Bank',
     x: 780,
-    y: 1810,
+    y: 1870,
     w: 460,
     h: 300,
     color: 0xFFB7C9E2,
@@ -220,7 +246,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'mall',
     name: 'Mall',
     x: 3020,
-    y: 1810,
+    y: 1870,
     w: 560,
     h: 320,
     color: 0xFFD5A6BD,
@@ -229,7 +255,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'police',
     name: 'Police Station',
     x: 2120,
-    y: 1810,
+    y: 1870,
     w: 460,
     h: 280,
     color: 0xFF4A86E8,
@@ -239,7 +265,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'computer',
     name: 'Computer Center',
     x: 120,
-    y: 2410,
+    y: 2470,
     w: 440,
     h: 300,
     color: 0xFF8E7CC3,
@@ -249,7 +275,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'amusement',
     name: 'Amusement Park',
     x: 700,
-    y: 2410,
+    y: 2470,
     w: 560,
     h: 300,
     color: 0xFFFFD966,
@@ -259,7 +285,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'beach',
     name: 'Beach',
     x: 1400,
-    y: 2410,
+    y: 2470,
     w: 480,
     h: 300,
     color: 0xFF4DD0E1,
@@ -269,7 +295,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'fishing',
     name: 'Fishing Area',
     x: 2020,
-    y: 2410,
+    y: 2470,
     w: 480,
     h: 300,
     color: 0xFF6D9EEB,
@@ -279,7 +305,7 @@ List<LocationModel> buildTownLocations() => [
     id: 'hotel',
     name: 'Hotel',
     x: 3020,
-    y: 2410,
+    y: 2470,
     w: 560,
     h: 300,
     color: 0xFFB39DDB,
@@ -335,21 +361,47 @@ List<TownDecoration> buildTownDecorations() {
       }
     }
     for (var x = 300.0; x < kWorldWidth - 100; x += 340) {
-      if (clearOfDoors(x, margin: 100)) {
-        out.add(TownDecoration('lamp', x, top - kSidewalkHeight + 8, 60));
+      // Lamps line the highway on the grass just outside the sidewalk:
+      // visible from the road, never centered on asphalt, never blocking
+      // the sidewalk way. Cross-street junction is always skipped.
+      if (x > kCrossStreetLeft - 180 && x < kCrossStreetRight + 180) continue;
+      final northX = x;
+      final southX = x + 170;
+      if (southX > kCrossStreetLeft - 180 && southX < kCrossStreetRight + 180) {
+        continue;
       }
-      if (clearOfDoors(x + 170, margin: 100)) {
-        out.add(TownDecoration('lamp', x + 170, bottom + 40, 60));
+      final northY = top - kSidewalkHeight - 14;
+      final southY = bottom + kSidewalkHeight + 14;
+      if (clearOfDoors(northX, margin: 100) &&
+          !isOnAnyAsphalt(northX, northY)) {
+        out.add(TownDecoration('lamp', northX, northY, 60));
+      }
+      if (clearOfDoors(southX, margin: 100) &&
+          !isOnAnyAsphalt(southX, southY)) {
+        out.add(TownDecoration('lamp', southX, southY, 60));
       }
     }
 
     // Hedges and flower beds in the grass, clear of the doorways.
+    // Explicitly skipped on the road corridor and the crossing street
+    // so the 5-dot flower beds never sit centered on a junction.
     for (var x = 160.0; x < kWorldWidth - 260; x += 360) {
+      if (x > kCrossStreetLeft - 200 && x < kCrossStreetRight + 200) continue;
+      final flowerX = x + 180;
+      if (flowerX > kCrossStreetLeft - 200 &&
+          flowerX < kCrossStreetRight + 200) {
+        continue;
+      }
       if (clearOfDoors(x, margin: 210)) {
-        out.add(TownDecoration('bush', x, top - kSidewalkHeight - 60, 96));
-        out.add(
-          TownDecoration('flowers', x + 180, bottom + kSidewalkHeight + 96, 70),
-        );
+        final bushY = top - kSidewalkHeight - 60;
+        final flowerY = bottom + kSidewalkHeight + 96;
+        if (!decorationOnRoad(bushY) && !isOnAnyAsphalt(x, bushY)) {
+          out.add(TownDecoration('bush', x, bushY, 96));
+        }
+        if (!decorationOnRoad(flowerY) &&
+            !isOnAnyAsphalt(flowerX, flowerY)) {
+          out.add(TownDecoration('flowers', flowerX, flowerY, 70));
+        }
       }
     }
   }
@@ -373,7 +425,7 @@ List<Rect> buildPedestrianBands() => [
   ],
   const Rect.fromLTRB(2810, 60, 2950, 400),
   const Rect.fromLTRB(2810, 640, 2950, 960),
-  const Rect.fromLTRB(2810, 1210, 2950, 1560),
-  const Rect.fromLTRB(2810, 1810, 2950, 2160),
-  const Rect.fromLTRB(2810, 2410, 2950, 2840),
+  const Rect.fromLTRB(2810, 1210, 2950, 1620),
+  const Rect.fromLTRB(2810, 1870, 2950, 2220),
+  const Rect.fromLTRB(2810, 2470, 2950, 2840),
 ];

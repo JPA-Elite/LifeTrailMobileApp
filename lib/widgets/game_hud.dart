@@ -32,14 +32,14 @@ class GameHud extends ConsumerWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Width is split by content density instead of equal
-                // thirds: the sparse clock/money card needs the least
-                // room and the stats card the most.
+                // Width is split with equal sides: left clock/money and
+                // right skills share the same flex, center vitals
+                // (HP/Energy/Happy) gets slightly more for its fixed bars.
                 Expanded(flex: 3, child: _clockCard(state)),
                 const SizedBox(width: 6),
-                Expanded(flex: 3, child: _vitalsCard(state)),
+                Expanded(flex: 4, child: _vitalsCard(state)),
                 const SizedBox(width: 6),
-                Expanded(flex: 4, child: _skillsCard(state)),
+                Expanded(flex: 3, child: _skillsCard(state)),
               ],
             ),
           ),

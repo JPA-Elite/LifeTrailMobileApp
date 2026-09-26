@@ -1,4 +1,6 @@
 import 'dart:math';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
@@ -33,6 +35,11 @@ class TownWorld extends LifeWorld {
         .toList();
     streetProps = buildTownDecorations()
         .where((d) => d.solid)
+        // Safety: lamps never spawn centered on asphalt or junctions —
+        // grass/sidewalk edge only, so they never block the way.
+        .where(
+          (d) => (d.kind != 'lamp') || !isOnAnyAsphalt(d.x, d.y),
+        )
         .map((d) => StreetProp(decoration: d))
         .toList();
   }
@@ -82,7 +89,7 @@ class TownWorld extends LifeWorld {
       labelColor: Colors.white,
     );
     _loadLotSprite(
-      'school.jpg',
+      'school.png',
       'school',
       scale: 1.15,
       widthBoost: 1.4,
@@ -96,7 +103,7 @@ class TownWorld extends LifeWorld {
       labelColor: Colors.white,
     );
     _loadLotSprite(
-      'park.jpg',
+      'park.png',
       'park',
       scale: 1.15,
       widthBoost: 1.4,
@@ -109,6 +116,7 @@ class TownWorld extends LifeWorld {
       widthBoost: 1.1,
       labelColor: Colors.white,
     );
+    _loadTreeSprite();
   }
 
   void _loadLotSprite(
@@ -128,6 +136,17 @@ class TownWorld extends LifeWorld {
             labelColor: labelColor,
           );
         }
+      }
+    }).catchError((_) {});
+  }
+
+  /// Loads tree.png in the background and hands it to every tree prop.
+  /// Gameplay / collision never waits for the decode; trees render the
+  /// procedural canopy until the art arrives.
+  void _loadTreeSprite() {
+    Sprite.load('tree.png').then((sprite) {
+      for (final prop in streetProps) {
+        if (prop.decoration.kind == 'tree') prop.setTreeSprite(sprite);
       }
     }).catchError((_) {});
   }
@@ -253,16 +272,83 @@ class TownBackdrop extends PositionComponent {
   static final List<TownStrip> _roads = buildTownRoads();
   static final List<TownDecoration> _planting = [
     for (final d in buildTownDecorations())
-      if (!d.solid) d,
+      if (!d.solid &&
+          !decorationOnRoad(d.y, margin: 24) &&
+          !isOnAnyAsphalt(d.x, d.y))
+        d,
   ];
+
+  /// Soft large-scale tonal variation to break up tile repetition.
+  /// Deterministic so it looks identical every run.
+  static final List<_GrassPatch> _patches = (() {
+    final r = Random(11);
+    return List.generate(46, (_) {
+      return _GrassPatch(
+        x: r.nextDouble() * kWorldWidth,
+        y: r.nextDouble() * kWorldHeight,
+        radius: 140 + r.nextDouble() * 320,
+        color: r.nextBool()
+            ? const Color(0xFF5E7F43)
+            : const Color(0xFF8FAE6B),
+        opacity: 0.06 + r.nextDouble() * 0.07,
+      );
+    });
+  })();
+
+  ui.Image? _grassTile;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    try {
+      final sprite = await Sprite.load('grass_tile.png');
+      _grassTile = sprite.image;
+    } catch (_) {
+      _grassTile = null;
+    }
+  }
 
   @override
   void render(Canvas canvas) {
-    // Ground.
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.x, size.y),
-      Paint()..color = const Color(0xFFCFE0B5),
-    );
+    // Ground: realistic tiled grass, single draw via ImageShader.
+    // Falls back to a natural flat green if the tile is not ready.
+    final tile = _grassTile;
+    if (tile != null) {
+      // Base underneath (seams / load gaps never flash light green).
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.x, size.y),
+        Paint()..color = const Color(0xFF6F9155),
+      );
+      final shaderPaint = Paint()
+        ..shader = ui.ImageShader(
+          tile,
+          ui.TileMode.repeated,
+          ui.TileMode.repeated,
+          Float64List.fromList(const [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+          ]),
+        );
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.x, size.y),
+        shaderPaint,
+      );
+      // Large soft patches kill the visible tiling grid.
+      for (final p in _patches) {
+        canvas.drawCircle(
+          Offset(p.x, p.y),
+          p.radius,
+          Paint()..color = p.color.withValues(alpha: p.opacity),
+        );
+      }
+    } else {
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.x, size.y),
+        Paint()..color = const Color(0xFF6F9155),
+      );
+    }
 
     // Roads and sidewalks.
     for (final strip in _roads) {
@@ -336,8 +422,12 @@ class TownBackdrop extends PositionComponent {
   }
 
   /// Hedges and flower beds (the non-solid planting).
+  /// Grass only: anything on the highway corridor or crossing junction
+  /// is skipped so the 5-red-dot flower beds never sit centered on roads.
   void _paintSoftPlanting(Canvas canvas) {
     for (final d in _planting) {
+      if (decorationOnRoad(d.y, margin: 24)) continue;
+      if (isOnAnyAsphalt(d.x, d.y)) continue;
       switch (d.kind) {
         case 'bush':
           canvas.drawCircle(
@@ -372,6 +462,23 @@ class TownBackdrop extends PositionComponent {
   }
 }
 
+/// Large soft tonal blob to hide tiling repetition on the grass.
+class _GrassPatch {
+  final double x;
+  final double y;
+  final double radius;
+  final Color color;
+  final double opacity;
+
+  const _GrassPatch({
+    required this.x,
+    required this.y,
+    required this.radius,
+    required this.color,
+    required this.opacity,
+  });
+}
+
 /// A physical piece of street dressing: trees, benches, lamps and hydrants.
 /// Only the small footprint at its base blocks movement, so the player can
 /// walk under a tree canopy or past a bench top.
@@ -381,8 +488,21 @@ class TownBackdrop extends PositionComponent {
 class StreetProp extends PositionComponent implements Interactable {
   final TownDecoration decoration;
 
+  /// Custom tree art (tree.png), assigned in the background by TownWorld.
+  /// Falls back to the procedural canopy until it arrives.
+  Sprite? _treeSprite;
+
+  void setTreeSprite(Sprite sprite) {
+    _treeSprite = sprite;
+  }
+
   StreetProp({required this.decoration})
-    : super(priority: 40, anchor: Anchor.topLeft) {
+    : super(
+        // Trees rise above benches/lamps/hydrants so canopies never
+        // get covered by nearby seating.
+        priority: decoration.kind == 'tree' ? 45 : 40,
+        anchor: Anchor.topLeft,
+      ) {
     final s = decoration.size;
     size = switch (decoration.kind) {
       'tree' => Vector2(s * 0.34, s * 0.26),
@@ -397,9 +517,30 @@ class StreetProp extends PositionComponent implements Interactable {
 
   @override
   void render(Canvas canvas) {
+    // Lamps line the road — only skip them if centered on asphalt or
+    // on the crossing junction where they would block the way.
+    if (decoration.kind == 'lamp' &&
+        isOnAnyAsphalt(decoration.x, decoration.y)) {
+      return;
+    }
     final s = decoration.size;
     switch (decoration.kind) {
       case 'tree':
+        final tree = _treeSprite;
+        if (tree != null) {
+          // Bottom-center anchored on the ground contact point, rising
+          // above the small collision footprint. Same visual bulk as
+          // the old procedural canopy so spacing still reads.
+          final src = tree.srcSize;
+          final drawW = s * 1.05;
+          final drawH = drawW * src.y / src.x;
+          tree.render(
+            canvas,
+            position: Vector2((size.x - drawW) / 2, size.y - drawH),
+            size: Vector2(drawW, drawH),
+          );
+          break;
+        }
         final baseY = size.y;
         canvas.drawRect(
           Rect.fromLTWH(size.x / 2 - 7, 0, 14, baseY),
@@ -788,17 +929,20 @@ class NpcMarker extends PositionComponent implements Interactable {
         priority: 60,
       );
 
+  /// Initial letter never changes: lay out once instead of every frame.
+  late final TextPainter _initialPainter = TextPainter(
+    text: TextSpan(
+      text: npcName.isEmpty ? '?' : npcName[0],
+      style: const TextStyle(color: Colors.white, fontSize: 24),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+
   @override
   void render(Canvas canvas) {
     final paint = Paint()..color = const Color(0xFF4A86E8);
     canvas.drawCircle(const Offset(28, 28), 26, paint);
-    final tp = TextPainter(
-      text: TextSpan(
-        text: npcName.isEmpty ? '?' : npcName[0],
-        style: const TextStyle(color: Colors.white, fontSize: 24),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
+    final tp = _initialPainter;
     tp.paint(canvas, Offset(28 - tp.width / 2, 28 - tp.height / 2));
   }
 

@@ -19,6 +19,13 @@ import '../models/location_dialogue.dart';
 import '../models/npc_model.dart';
 import '../models/quest_model.dart';
 
+/// A tracked map pointer: position + landing time for pinch pairing.
+class _TouchDown {
+  Offset pos;
+  final int timeMs;
+  _TouchDown(this.pos, this.timeMs);
+}
+
 class GameScreen extends ConsumerStatefulWidget {
   const GameScreen({super.key});
 
@@ -37,6 +44,66 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   String? _locationSheet;
   String? _error;
   final _save = PrefsSaveService();
+
+  /// Raw two-finger tracking for pinch zoom, scoped to the GameWidget.
+  /// Taps on buttons/HUD/dialogs hit-test above the game, so they never
+  /// enter this tracker. A pinch engages ONLY when both fingers land
+  /// within [_pinchTogetherMs] of each other (two hands together): the
+  /// walking finger is seconds old, so walk + incidental brush/tap can
+  /// never form a pinch pair and drift the zoom. A passive Listener
+  /// sees every map pointer with no gesture-arena slop.
+  final Map<int, _TouchDown> _touches = {};
+  double _pinchBaseDist = 0;
+
+  /// Fingers closer than this never start a pinch: near-adjacent
+  /// pointers turn 1px tremors into huge ratios.
+  static const double _minPinchDist = 48;
+
+  /// Finger-distance change below this is thumb tremor, not a pinch.
+  static const double _pinchSlop = 10;
+
+  /// Both fingers must land within this window to count as one pinch.
+  static const int _pinchTogetherMs = 500;
+
+  bool _pinchActive = false;
+
+  void _pinchDown(PointerDownEvent e) {
+    _touches[e.pointer] = _TouchDown(
+      e.position,
+      DateTime.now().millisecondsSinceEpoch,
+    );
+    _pinchActive = false;
+    if (_touches.length == 2) {
+      final pts = _touches.values.toList();
+      final landedTogether =
+          (pts[0].timeMs - pts[1].timeMs).abs() <= _pinchTogetherMs;
+      _pinchBaseDist = (pts[0].pos - pts[1].pos).distance;
+      if (landedTogether && _pinchBaseDist >= _minPinchDist) {
+        _pinchActive = true;
+        _game?.pinchStart();
+      }
+    }
+  }
+
+  void _pinchMove(PointerMoveEvent e) {
+    final touch = _touches[e.pointer];
+    if (touch == null) return;
+    touch.pos = e.position;
+    if (_touches.length != 2 || !_pinchActive || _pinchBaseDist <= 0) return;
+    final pts = _touches.values.toList();
+    final d = (pts[0].pos - pts[1].pos).distance;
+    if (d <= 0 || (d - _pinchBaseDist).abs() < _pinchSlop) return;
+    _game?.pinchZoomBy(d / _pinchBaseDist);
+    _pinchBaseDist = d;
+  }
+
+  void _pinchUp(PointerEvent e) {
+    _touches.remove(e.pointer);
+    if (_touches.length < 2) {
+      _pinchBaseDist = 0;
+      _pinchActive = false;
+    }
+  }
 
   @override
   void dispose() {
@@ -450,7 +517,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             // Gating this on `isReady` deadlocked: onLoad only runs after
             // the widget mounts, so `isReady` never became true.
             Positioned.fill(
-              child: GameWidget(
+              child: Listener(
+                onPointerDown: _pinchDown,
+                onPointerMove: _pinchMove,
+                onPointerUp: _pinchUp,
+                onPointerCancel: _pinchUp,
+                child: GameWidget(
                 game: _game!,
                 loadingBuilder: (_) => Container(
                   color: const Color(0xFFEFE8D5),
@@ -459,6 +531,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 errorBuilder: (_, ex) => Container(
                   color: const Color(0xFFEFE8D5),
                   child: Center(child: Text('Game failed to load: $ex')),
+                ),
                 ),
               ),
             )
@@ -1413,7 +1486,7 @@ class _PhoneSheet extends ConsumerWidget {
           ),
           padding: const EdgeInsets.all(10),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Center(
                 child: Container(
@@ -1464,93 +1537,105 @@ class _PhoneSheet extends ConsumerWidget {
                     color: Colors.white.withAlpha(240),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: GridView.count(
-                    crossAxisCount: 4,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 6,
-                children: [
-                  _phoneTile(
-                    Icons.chat_bubble_rounded,
-                    'Messages',
-                    const Color(0xFF4A86E8),
-                    () => _phoneInfo(
-                      context,
-                      'Messages',
-                      'Alex: plaza later?',
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _phoneTile(
+                              Icons.chat_bubble_rounded,
+                              'Messages',
+                              const Color(0xFF4A86E8),
+                              () => _phoneInfo(
+                                context,
+                                'Messages',
+                                'Alex: plaza later?',
+                              ),
+                            ),
+                            _phoneTile(
+                              Icons.contacts_rounded,
+                              'Contacts',
+                              const Color(0xFF8E7CC3),
+                              () => _phoneInfo(
+                                context,
+                                'Contacts',
+                                'No contacts yet.',
+                              ),
+                            ),
+                            _phoneTile(
+                              Icons.calendar_month_rounded,
+                              'Calendar',
+                              const Color(0xFFE69138),
+                              () => _phoneInfo(
+                                context,
+                                'Calendar',
+                                'Mon-Fri: School',
+                              ),
+                            ),
+                            _phoneTile(
+                              Icons.map_rounded,
+                              'Map',
+                              const Color(0xFF6AA84F),
+                              () => _phoneInfo(
+                                context,
+                                'Map',
+                                'School - Plaza - Home - Cafe',
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 44),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _phoneTile(
+                              Icons.account_balance_wallet_rounded,
+                              'Finance',
+                              const Color(0xFFB45F06),
+                              () => _phoneInfo(
+                                context,
+                                'Finance',
+                                'Balance: ${gs.pesoBalance}',
+                              ),
+                            ),
+                            _phoneTile(
+                              Icons.backpack_rounded,
+                              'Quests',
+                              const Color(0xFFCC4125),
+                              () => _phoneInfo(
+                                context,
+                                'Quests',
+                                'No quests yet.',
+                              ),
+                            ),
+                            _phoneTile(
+                              Icons.school_rounded,
+                              'School',
+                              const Color(0xFF2E7D5B),
+                              () => _phoneInfo(
+                                context,
+                                'School',
+                                'Edu: ${gs.player.education}',
+                              ),
+                            ),
+                            _phoneTile(
+                              Icons.settings_rounded,
+                              'Settings',
+                              const Color(0xFF5B5B5B),
+                              () {
+                                Navigator.of(context).pop();
+                                Navigator.of(context).pushNamed('/settings');
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ),
-                  _phoneTile(
-                    Icons.contacts_rounded,
-                    'Contacts',
-                    const Color(0xFF8E7CC3),
-                    () => _phoneInfo(
-                      context,
-                      'Contacts',
-                      'No contacts yet.',
-                    ),
-                  ),
-                  _phoneTile(
-                    Icons.calendar_month_rounded,
-                    'Calendar',
-                    const Color(0xFFE69138),
-                    () => _phoneInfo(
-                      context,
-                      'Calendar',
-                      'Mon-Fri: School',
-                    ),
-                  ),
-                  _phoneTile(
-                    Icons.map_rounded,
-                    'Map',
-                    const Color(0xFF6AA84F),
-                    () => _phoneInfo(
-                      context,
-                      'Map',
-                      'School - Plaza - Home - Cafe',
-                    ),
-                  ),
-                  _phoneTile(
-                    Icons.account_balance_wallet_rounded,
-                    'Finance',
-                    const Color(0xFFB45F06),
-                    () => _phoneInfo(
-                      context,
-                      'Finance',
-                      'Balance: ${gs.pesoBalance}',
-                    ),
-                  ),
-                  _phoneTile(
-                    Icons.backpack_rounded,
-                    'Quests',
-                    const Color(0xFFCC4125),
-                    () => _phoneInfo(
-                      context,
-                      'Quests',
-                      'No quests yet.',
-                    ),
-                  ),
-                  _phoneTile(
-                    Icons.school_rounded,
-                    'School',
-                    const Color(0xFF2E7D5B),
-                    () => _phoneInfo(
-                      context,
-                      'School',
-                      'Edu: ${gs.player.education}',
-                    ),
-                  ),
-                  _phoneTile(
-                    Icons.settings_rounded,
-                    'Settings',
-                    const Color(0xFF5B5B5B),
-                    () {
-                      Navigator.of(context).pop();
-                      Navigator.of(context).pushNamed('/settings');
-                    },
-                  ),
-                ],
-              ),
             ),
+          ),
           ),
           Center(
             child: Container(
@@ -1594,6 +1679,7 @@ class _PhoneSheet extends ConsumerWidget {
           const SizedBox(height: 4),
           Text(
             label,
+            textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w600,
@@ -1627,8 +1713,9 @@ class _PhoneSheet extends ConsumerWidget {
           color: Color(0xFF1A1D21),
           fontSize: 14,
         ),
-        title: Text(title),
-        content: Text(body),
+        title: Text(title, textAlign: TextAlign.center),
+        content: Text(body, textAlign: TextAlign.center),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),

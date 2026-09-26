@@ -62,6 +62,17 @@ class LifeGame extends FlameGame {
   static const double dayNightAlphaNight = 0.45;
   double nightAlpha = 0.0;
 
+  /// Default (fitted) zoom captured on the first pinch; the clamp stays
+  /// relative to this across gestures so repeated pinches can't creep
+  /// the range outward.
+  double _defaultZoom = 0;
+
+  /// Smoothed zoom target. Finger events only move the target; update()
+  /// eases the real zoom toward it every frame, so delayed or dropped
+  /// touch events on a phone read as glide instead of stutter.
+  /// 0 = no active pinch target (zoom stays where it is).
+  double _targetZoom = 0;
+
   LifeGame({
     required this.onNearestChanged,
     required this.onEnterLocation,
@@ -232,6 +243,18 @@ class LifeGame extends FlameGame {
 
     super.update(dt);
 
+    // Ease the camera toward the pinch target (~10/s): smooth glide
+    // even when touch events arrive late or drop on a real phone.
+    if (_targetZoom > 0) {
+      final z = camera.viewfinder.zoom;
+      final diff = _targetZoom - z;
+      if (diff.abs() < 0.0005) {
+        camera.viewfinder.zoom = _targetZoom;
+      } else {
+        camera.viewfinder.zoom = z + diff * (1 - pow(0.5, dt * 10));
+      }
+    }
+
     final world = _activeWorld;
     if (!isLoaded || hero == null || world == null) return;
 
@@ -295,6 +318,47 @@ class LifeGame extends FlameGame {
 
   void setNightAlpha(double alpha) {
     nightAlpha = alpha.clamp(0.0, 0.55);
+  }
+
+  /// Called when two fingers land on the open map: anchors the smoothed
+  /// zoom target. Driven by raw pointer tracking in GameScreen scoped to
+  /// the GameWidget, with no gesture-arena slop or dead zones.
+  void pinchStart() {
+    if (!isLoaded) return;
+    if (_defaultZoom <= 0) _defaultZoom = camera.viewfinder.zoom;
+    _targetZoom = camera.viewfinder.zoom;
+  }
+
+  /// Applies one incremental finger-distance ratio to the zoom target.
+  /// Single-finger drags and UI taps never reach here (GameScreen only
+  /// calls this with exactly two pointers down on the map), so the
+  /// joystick is unaffected.
+  void pinchZoomBy(double factor) {
+    if (!isLoaded || factor <= 0 || !factor.isFinite) return;
+    if (_defaultZoom <= 0) _defaultZoom = camera.viewfinder.zoom;
+    if (_targetZoom <= 0) _targetZoom = camera.viewfinder.zoom;
+    _targetZoom = (_targetZoom * factor).clamp(
+      _defaultZoom * 0.5,
+      _defaultZoom * 3.0,
+    );
+  }
+
+  @override
+  void onGameResize(Vector2 size) {
+    super.onGameResize(size);
+    // Rotation/resize refits the zoom from visibleGameSize: carry the
+    // user's relative zoom over to the new fit instead of dropping it,
+    // so a walked/zoomed view stays put (permanent) instead of
+    // snapping back to the default while playing.
+    final fitted = camera.viewfinder.zoom;
+    _defaultZoom = fitted;
+    if (_targetZoom > 0) {
+      _targetZoom = _targetZoom.clamp(
+        _defaultZoom * 0.5,
+        _defaultZoom * 3.0,
+      );
+      camera.viewfinder.zoom = _targetZoom;
+    }
   }
 
   @override

@@ -248,6 +248,13 @@ class InteriorPropBlock extends RectangleComponent implements Interactable {
 }
 
 /// Draws a bold centred label inside [size], used by interior components.
+///
+/// Text layout is cached per unique style: these labels are static, and
+/// laying out a TextPainter every frame for every building (~20 × 60fps)
+/// was a major frame-time cost on phones (visible as camera stutter
+/// while walking zoomed).
+final Map<String, TextPainter> _labelCache = {};
+
 void drawCenteredLabel(
   Canvas canvas,
   Vector2 size,
@@ -256,20 +263,26 @@ void drawCenteredLabel(
   required double fontSize,
   bool shadow = false,
 }) {
-  final painter = TextPainter(
-    text: TextSpan(
-      text: text,
-      style: TextStyle(
-        color: color,
-        fontSize: fontSize,
-        fontWeight: FontWeight.bold,
-        shadows: shadow
-            ? const [Shadow(color: Colors.black54, blurRadius: 3)]
-            : null,
-      ),
-    ),
-    textDirection: TextDirection.ltr,
-  )..layout();
+  final key = '$text|$fontSize|${color.toARGB32()}|$shadow';
+  var painter = _labelCache[key];
+  if (painter == null) {
+    painter =
+        TextPainter(
+          text: TextSpan(
+            text: text,
+            style: TextStyle(
+              color: color,
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+              shadows: shadow
+                  ? const [Shadow(color: Colors.black54, blurRadius: 3)]
+                  : null,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+    _labelCache[key] = painter;
+  }
   painter.paint(
     canvas,
     Offset((size.x - painter.width) / 2, (size.y - painter.height) / 2),
