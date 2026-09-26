@@ -912,15 +912,6 @@ class AtmProp extends PositionComponent implements Interactable {
     const bodyW = 64.0;
     const bodyH = 104.0;
     final left = (size.x - bodyW) / 2;
-    // Ground shadow.
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(size.x / 2, size.y - 4),
-        width: bodyW + 16,
-        height: 18,
-      ),
-      Paint()..color = const Color(0x33000000),
-    );
     // Kiosk body rising above its footprint.
     final bodyTop = size.y - 6 - bodyH;
     canvas.drawRRect(
@@ -1034,15 +1025,6 @@ class BuildingBlock extends RectangleComponent implements Interactable {  final 
     // Collision / door logic is unchanged.
     final lotSprite = _lotSprite;
     if (lotSprite != null) {
-      // Soft grounding shadow along the south edge.
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(size.x / 2, size.y - 6),
-          width: size.x * 0.88,
-          height: 40,
-        ),
-        Paint()..color = const Color(0x2E000000),
-      );
       canvas.save();
       canvas.clipRect(Rect.fromLTWH(0, 0, size.x, size.y));
       final src = lotSprite.srcSize;
