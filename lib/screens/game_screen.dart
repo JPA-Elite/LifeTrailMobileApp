@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flame/game.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../game/life_game.dart';
 import '../game/state/game_state.dart';
 import '../game/world/interactable.dart';
+import '../game/world/mini_map_scene.dart';
 import '../services/game_data_service.dart';
 import '../services/save_service.dart';
 import '../services/audio_service.dart';
@@ -683,11 +685,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   void _openPhone() {
+    final game = _game;
+    if (game == null) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const _PhoneSheet(),
+      builder: (_) => _PhoneSheet(
+        position: game.playerMapPosition,
+        scene: game.miniMapScene,
+      ),
     );
   }
 
@@ -1488,7 +1495,10 @@ class _LocationPanel extends ConsumerWidget {
 }
 
 class _PhoneSheet extends ConsumerWidget {
-  const _PhoneSheet();
+  final ValueListenable<Vector2> position;
+  final ValueListenable<MiniMapScene> scene;
+
+  const _PhoneSheet({required this.position, required this.scene});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1600,11 +1610,7 @@ class _PhoneSheet extends ConsumerWidget {
                               Icons.map_rounded,
                               'Map',
                               const Color(0xFF6AA84F),
-                              () => _phoneInfo(
-                                context,
-                                'Map',
-                                'School - Plaza - Home - Cafe',
-                              ),
+                              () => _phoneFullMap(context),
                             ),
                           ],
                         ),
@@ -1746,6 +1752,57 @@ class _PhoneSheet extends ConsumerWidget {
             child: const Text('Close'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _phoneFullMap(BuildContext context) {
+    final screenW = MediaQuery.of(context).size.width;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog.fullscreen(
+        backgroundColor: const Color(0xFF111417),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Town Map',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      icon: const Icon(Icons.close, color: Colors.white),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      child: MiniMap(
+                        position: position,
+                        scene: scene,
+                        width: (screenW - 64).clamp(280.0, 560.0),
+                        mapHeightMax: 2000,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

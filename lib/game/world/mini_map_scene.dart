@@ -4,13 +4,15 @@ import '../../models/location_dialogue.dart';
 import 'interior_data.dart';
 import 'map_data.dart';
 
-/// One rectangle of a minimap.
+/// One rectangle of a minimap, optionally carrying a small label
+/// (town buildings show their names).
 class MiniMapBlock {
   final Rect rect;
   final Color color;
   final bool isMarker;
+  final String? label;
 
-  const MiniMapBlock(this.rect, this.color, {this.isMarker = false});
+  const MiniMapBlock(this.rect, this.color, {this.isMarker = false, this.label});
 
   factory MiniMapBlock.at(double x, double y, double size, Color color) =>
       MiniMapBlock(
@@ -55,7 +57,11 @@ class MiniMapScene {
             const Color(0xFF3F7D3A),
           ),
       for (final LocationModel l in buildTownLocations())
-        MiniMapBlock(Rect.fromLTWH(l.x, l.y, l.w, l.h), Color(l.color)),
+        MiniMapBlock(
+          Rect.fromLTWH(l.x, l.y, l.w, l.h),
+          Color(l.color),
+          label: _shortLabel(l.name),
+        ),
       for (final LocationModel l in buildTownLocations())
         MiniMapBlock.at(
           l.x + l.w / 2,
@@ -138,6 +144,14 @@ class MiniMapScene {
 /// Doorway metrics shared with the interior scene.
 class InteriorWorldMetrics {
   static const double doorHeight = 68;
+}
+
+/// Long multi-word names don't fit small map blocks: use initials
+/// ("Police Station" -> "PS"). Single words stay whole.
+String _shortLabel(String name) {
+  final words = name.split(' ').where((w) => w.isNotEmpty).toList();
+  if (words.length < 2) return name;
+  return words.map((w) => w[0]).join().toUpperCase();
 }
 
 /// The minimap scene for [locationId], or the town when it is null.

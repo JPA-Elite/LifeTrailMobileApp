@@ -436,10 +436,11 @@ class TownBackdrop extends PositionComponent {
   ];
 
   /// Soft large-scale tonal variation to break up tile repetition.
-  /// Deterministic so it looks identical every run.
+  /// Deterministic so it looks identical every run. Kept small (24)
+  /// to limit full-screen overdraw on phones.
   static final List<_GrassPatch> _patches = (() {
     final r = Random(11);
-    return List.generate(46, (_) {
+    return List.generate(24, (_) {
       return _GrassPatch(
         x: r.nextDouble() * kWorldWidth,
         y: r.nextDouble() * kWorldHeight,
@@ -477,6 +478,9 @@ class TownBackdrop extends PositionComponent {
         Paint()..color = const Color(0xFF6F9155),
       );
       final shaderPaint = Paint()
+        // Bilinear filtering: kills minification shimmer (pixel crawl)
+        // when the camera moves while zoomed out.
+        ..filterQuality = FilterQuality.medium
         ..shader = ui.ImageShader(
           tile,
           ui.TileMode.repeated,

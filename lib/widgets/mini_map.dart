@@ -15,11 +15,15 @@ class MiniMap extends StatelessWidget {
   final ValueListenable<MiniMapScene> scene;
   final double width;
 
+  /// Cap for the painted map height (HUD default 104; fullscreen more).
+  final double mapHeightMax;
+
   const MiniMap({
     super.key,
     required this.position,
     required this.scene,
     this.width = 168,
+    this.mapHeightMax = 104,
   });
 
   @override
@@ -29,7 +33,7 @@ class MiniMap extends StatelessWidget {
       builder: (context, sceneValue, _) {
         final mapHeight = (width * sceneValue.height / sceneValue.width).clamp(
           64.0,
-          104.0,
+          mapHeightMax,
         );
         return ValueListenableBuilder<Vector2>(
           valueListenable: position,
@@ -127,6 +131,29 @@ class MiniMapPainter extends CustomPainter {
       );
     }
 
+    // Small building labels, each shrunk to fit inside its own
+    // building rect (never spilling onto neighbours). Layouts cached:
+    // the painter reruns on every player step.
+    for (final block in scene.blocks) {
+      final label = block.label;
+      if (label == null || label.isEmpty) continue;
+      final cap = 8.5 / scale;
+      final probe = _labelPainter(label, cap);
+      final fit = [
+        1.0,
+        (block.rect.width * 0.92) / probe.width,
+        (block.rect.height * 0.9) / probe.height,
+      ].reduce((a, b) => a < b ? a : b);
+      final painter = fit < 1.0 ? _labelPainter(label, cap * fit) : probe;
+      painter.paint(
+        canvas,
+        Offset(
+          block.rect.center.dx - painter.width / 2,
+          block.rect.center.dy - painter.height / 2,
+        ),
+      );
+    }
+
     // The player: a ring plus a dot, drawn at a constant on-screen size.
     // Kept small so it doesn't cover nearby buildings/doors.
     canvas.drawCircle(
@@ -154,4 +181,27 @@ class MiniMapPainter extends CustomPainter {
   @override
   bool shouldRepaint(MiniMapPainter oldDelegate) =>
       oldDelegate.position != position || oldDelegate.scene != scene;
+}
+
+/// Cached label painters (see interior drawCenteredLabel rationale).
+final Map<String, TextPainter> _miniLabelCache = {};
+
+TextPainter _labelPainter(String text, double fontSize) {
+  final key = '$text|$fontSize';
+  return _miniLabelCache.putIfAbsent(key, () {
+    return TextPainter(
+          text: TextSpan(
+            text: text,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+              shadows: const [Shadow(color: Colors.black87, blurRadius: 3)],
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.center,
+        )
+        ..layout();
+  });
 }
