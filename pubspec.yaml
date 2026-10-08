@@ -47,6 +47,12 @@ flutter:
     - assets/images/fishing.png
     - assets/images/hotel.png
     - assets/images/park.png
+    - assets/images/home_bed.png
+    - assets/images/home_closet.png
+    - assets/images/home_kitchen.png
+    - assets/images/home_sofa.png
+    - assets/images/home_tv.png
+    - assets/images/home_table.png
     - assets/data/npcs/
     - assets/data/quests/
     - assets/data/items/

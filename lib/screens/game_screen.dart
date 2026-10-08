@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flame/game.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../game/life_game.dart';
@@ -98,6 +99,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     _pinchActive = false;
     if (_touches.length == 2) {
       final pts = _touches.values.toList();
+      // A steering thumb is never half of a pinch: pairing it with a map
+      // finger turned steering wiggles into zoom pulses (screen shake).
+      // Pinch needs two free map fingers landing together.
+      if (pts.any((p) => p.joystick)) return;
       final landedTogether =
           (pts[0].timeMs - pts[1].timeMs).abs() <= _pinchTogetherMs;
       _pinchBaseDist = (pts[0].pos - pts[1].pos).distance;
@@ -120,6 +125,13 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     }
     if (_touches.length != 2 || !_pinchActive || _pinchBaseDist <= 0) return;
     final pts = _touches.values.toList();
+    // Belt and braces with _pinchDown: steering movement must never drive
+    // the zoom, even if a pair somehow engaged mid-gesture.
+    if (pts.any((p) => p.joystick)) {
+      _pinchActive = false;
+      _pinchBaseDist = 0;
+      return;
+    }
     final d = (pts[0].pos - pts[1].pos).distance;
     if (d <= 0 || (d - _pinchBaseDist).abs() < _pinchSlop) return;
     _game?.pinchZoomBy(d / _pinchBaseDist);
@@ -140,13 +152,29 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     super.dispose();
   }
 
+  /// Frame-safe setState for game-engine callbacks (nearest-changed,
+  /// enter/leave, toasts). The Flame engine ticks inside the framework's
+  /// build/layout phase, so a raw setState there throws "setState() called
+  /// during build". When a frame is in progress the update waits for its
+  /// end (at most ~1 frame of delay); otherwise it applies immediately.
+  void _syncState(VoidCallback fn) {
+    if (!mounted) return;
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
+      setState(fn);
+    } else {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(fn);
+      });
+    }
+  }
+
   /// Toast-style transient banner: shows for a few seconds then clears
   /// itself, so "You head back outside" never sticks on screen forever.
   void _flashMessage(String text, {int seconds = 3}) {
     _messageTimer?.cancel();
-    setState(() => _message = text);
+    _syncState(() => _message = text);
     _messageTimer = Timer(Duration(seconds: seconds), () {
-      if (mounted) setState(() => _message = '');
+      _syncState(() => _message = '');
     });
   }
 
@@ -179,7 +207,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         );
       }
       _game = LifeGame(
-        onNearestChanged: (n) => setState(() => _nearest = n),
+        onNearestChanged: (n) => _syncState(() => _nearest = n),
         // Walking through a door swaps the Flame world for the interior
         // scene, so close the action sheet: inside, the room's own
         // activity point opens it again. Entry also advances 90 min and
@@ -187,8 +215,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         canEnterLocation: (id) =>
             ref.read(gameStateProvider).canEnterBuilding(id),
         onEnterLocation: _handleEnterLocation,
-        onOpenLocationMenu: (id) => setState(() => _locationSheet = id),
-        onLeftLocation: (id) => setState(() => _locationSheet = null),
+        onOpenLocationMenu: (id) => _syncState(() => _locationSheet = id),
+        onLeftLocation: (id) => _syncState(() => _locationSheet = null),
         onTalkTo: _talkTo,
         onMessage: (m) => _flashMessage(m),
         onSitDown: _performSitDown,
@@ -509,7 +537,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final gs = ref.read(gameStateProvider);
     gs.registerBuildingEntry();
     _refreshNpcMarkers();
-    setState(() => _locationSheet = null);
+    _syncState(() => _locationSheet = null);
     _flashMessage(
       'Entered $id (+1h30m) — Day ${gs.time.day} ${gs.time.clockLabel} ${gs.time.periodLabel}',
       seconds: 4,
@@ -575,10 +603,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               ),
             ),
           GameHud(onSave: _quickSave),
-          // Map of wherever the player currently is: the town, or the room
-          // of the building they walked into. Tapping it opens the
-          // fullscreen town map modal.
-          if (game != null)
+          // Map of the town. Hidden inside buildings: the room is small
+          // enough to read at a glance, and the HUD stays out of the way.
+          // (The full map is still one tap away via Phone > Map.)
+          if (game != null && !game.isInsideBuilding)
             Align(
               alignment: Alignment.topRight,
               child: SafeArea(

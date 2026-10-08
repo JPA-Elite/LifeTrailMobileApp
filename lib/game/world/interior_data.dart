@@ -28,6 +28,17 @@ class InteriorProp {
   /// (full energy, clock jumps to 07:00). Used by the home bed.
   final bool sleep;
 
+  /// Optional sprite art for the prop (asset file under assets/images/,
+  /// e.g. 'home_bed.png'). Loaded in the background by [InteriorWorld];
+  /// the flat color rect is the fallback until it arrives. When art is
+  /// set, it replaces the rect + text label (the art speaks for itself).
+  final String? art;
+
+  /// Quarter-turns counter-clockwise applied to [art] when rendering
+  /// (the collision rect is expected to already match the rotated
+  /// footprint). 0 = upright.
+  final int artTurns;
+
   const InteriorProp({
     required this.x,
     required this.y,
@@ -40,6 +51,8 @@ class InteriorProp {
     this.opensMenu = false,
     this.sit,
     this.sleep = false,
+    this.art,
+    this.artTurns = 0,
   });
 }
 
@@ -94,66 +107,85 @@ InteriorLayout buildInterior(String locationId) {
         trimColor: 0xFFC79A6B,
         entryMessage: 'You step inside. It smells like home.',
         exitMessage: 'You head back outside.',
+        // Realistic setup: bedroom row on top (bed by the left wall,
+        // closet beside it, kitchen anchored top-right), living row below
+        // (sofa west, TV scene center facing it, dining table east).
+        // Rects match each art's aspect so contain-fit renders full-bleed.
+        // The middle band stays open as a walkway; the door approach is
+        // clear so spawning in still targets the exit.
         props: [
           InteriorProp(
-            x: 120,
-            y: 200,
-            w: 320,
-            h: 220,
+            x: 70,
+            y: 160,
+            w: 240,
+            h: 360,
             color: 0xFF8E7CC3,
             label: 'BED',
             interactLabel: 'Sleep in bed',
             sleep: true,
+            art: 'home_bed.png',
           ),
           InteriorProp(
-            x: 520,
-            y: 180,
-            w: 200,
-            h: 260,
+            x: 340,
+            y: 160,
+            w: 190,
+            h: 235,
             color: 0xFFA68A64,
             label: 'CLOSET',
             interactLabel: 'Open the closet',
             message: 'Two school uniforms and a hoodie.',
+            art: 'home_closet.png',
           ),
           InteriorProp(
-            x: 980,
-            y: 190,
-            w: 480,
-            h: 150,
+            x: 1116,
+            y: 170,
+            w: 460,
+            h: 400,
             color: 0xFFB7B7B7,
             label: 'KITCHEN',
             interactLabel: 'Open Home menu',
             opensMenu: true,
+            art: 'home_kitchen.png',
           ),
           InteriorProp(
-            x: 300,
-            y: 620,
-            w: 340,
-            h: 150,
+            x: 40,
+            y: 690,
+            w: 116,
+            h: 265,
             color: 0xFF6D9EEB,
             label: 'SOFA',
             interactLabel: 'Sit on the sofa',
             message: 'A couch facing an old TV set.',
+            art: 'home_sofa.png',
+            // Landscape art turned portrait like the table: faces the TV
+            // across the living zone, flush to the far left wall.
+            artTurns: 1,
           ),
           InteriorProp(
-            x: 760,
-            y: 650,
-            w: 220,
-            h: 100,
+            x: 570,
+            y: 460,
+            w: 410,
+            h: 350,
             color: 0xFF444444,
             label: 'TV',
             interactLabel: 'Turn on the TV',
             message: 'Static. The antenna needs fixing.',
+            art: 'home_tv.png',
           ),
           InteriorProp(
-            x: 1120,
-            y: 560,
-            w: 300,
-            h: 190,
+            x: 1400,
+            y: 640,
+            w: 160,
+            h: 265,
             color: 0xFFC79A6B,
             label: 'TABLE',
             interactLabel: 'Look at the table',
             message: 'Dinner is served at seven.',
+            art: 'home_table.png',
+            // Landscape art turned portrait: rect matches the rotated
+            // footprint (dining nook under the kitchen, clear of the TV
+            // and the door approach).
+            artTurns: 1,
           ),
         ],
       );

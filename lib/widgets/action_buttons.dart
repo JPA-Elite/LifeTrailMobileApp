@@ -32,6 +32,10 @@ class ActionButtons extends StatelessWidget {
         bottom: true,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          // Pin everything to the right edge: when the (usually wider)
+          // interact button appears/disappears, the RUN/PHONE row keeps
+          // its right edge and never slides sideways.
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (interactLabel != null)
               Padding(

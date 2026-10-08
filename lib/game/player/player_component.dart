@@ -47,7 +47,14 @@ class PlayerComponent extends PositionComponent {
 
   double get speed => running ? runSpeed : walkSpeed;
 
-  bool get isMoving => moveInput.length > 0.01;
+  /// Stick deflection below this is thumb rest / sensor noise, not intent:
+  /// without a deadband, a resting thumb sends full-speed micro-steps that
+  /// shake the camera (and flicker the walk pose) whenever a trigger
+  /// button is up. Above the band, speed ramps proportionally so light
+  /// touches creep instead of lurching; full tilt is unchanged.
+  static const double stickDeadband = 0.15;
+
+  bool get isMoving => moveInput.length > stickDeadband;
 
   /// Small box around the feet: what collides with the world and interacts.
   ///
@@ -65,7 +72,10 @@ class PlayerComponent extends PositionComponent {
 
     if (isMoving) {
       final direction = moveInput.normalized();
-      position += direction * speed * dt;
+      final strength = ((moveInput.length - stickDeadband) /
+              (1.0 - stickDeadband))
+          .clamp(0.0, 1.0);
+      position += direction * speed * strength * dt;
       if (direction.x.abs() > 0.15) {
         _facing = direction.x >= 0 ? 1 : -1;
       }

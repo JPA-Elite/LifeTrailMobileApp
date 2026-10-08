@@ -1,5 +1,6 @@
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 import 'interactable.dart';
 import 'interior_data.dart';
 import 'life_world.dart';
@@ -12,6 +13,10 @@ class InteriorWorld extends LifeWorld {
 
   final List<PositionComponent> _solids = [];
   ExitDoor? _exitDoor;
+
+  /// Player feet position fed in by LifeGame each frame (like the town's
+  /// traffic feed). Drives furniture depth-sorting below.
+  Vector2? playerPosition;
 
   InteriorWorld({required this.layout, required this.onNearestChanged});
 
@@ -89,11 +94,53 @@ class InteriorWorld extends LifeWorld {
     );
 
     for (final prop in layout.props) {
-      _addSolid(InteriorPropBlock(prop: prop, locationId: layout.id));
+      final block = InteriorPropBlock(prop: prop, locationId: layout.id);
+      _propBlocks.add(block);
+      _addSolid(block);
+      // Animated trigger point floating over the furniture, so the
+      // interaction spot is visible without hunting for it.
+      add(
+        TriggerMarker(
+          at: Vector2(prop.x + prop.w / 2, prop.y - 30),
+        ),
+      );
     }
 
     _exitDoor = ExitDoor(layout: layout, at: doorPosition);
     add(_exitDoor!);
+
+    // Furniture art loads in the background (same pattern as TownWorld
+    // lot sprites): gameplay / collision never waits for image decodes,
+    // and the flat color rect renders until the art arrives.
+    _loadPropArt();
+  }
+
+  /// Custom sprite art per furniture prop, assigned in the background.
+  final List<InteriorPropBlock> _propBlocks = [];
+
+  void _loadPropArt() {
+    for (final block in _propBlocks) {
+      final art = block.prop.art;
+      if (art == null) continue;
+      Sprite.load(art).then(block.setSprite).catchError((_) {});
+    }
+  }
+
+  /// Depth-sort furniture against the player (Y-sort): collision only
+  /// guards the feet box while the figure is 82px tall and always drawn
+  /// on top, so without this the body visibly sinks INTO tall art when
+  /// standing behind it. Furniture whose base is below the player's feet
+  /// draws under them (101, over the player); anything else stays under
+  /// the player (50, above floor and walls).
+  @override
+  void update(double dt) {
+    super.update(dt);
+    final py = playerPosition?.y;
+    if (py == null) return;
+    for (final block in _propBlocks) {
+      final base = block.position.y + block.size.y;
+      block.priority = py < base - 10 ? 101 : 50;
+    }
   }
 
   void _addSolid(PositionComponent component) {
@@ -163,6 +210,14 @@ class InteriorPropBlock extends RectangleComponent implements Interactable {
   final InteriorProp prop;
   final String locationId;
 
+  /// Custom art for [prop.art], assigned in the background by
+  /// [InteriorWorld]. Falls back to the flat color rect until it arrives.
+  Sprite? _sprite;
+
+  void setSprite(Sprite sprite) {
+    _sprite = sprite;
+  }
+
   InteriorPropBlock({required this.prop, required this.locationId})
     : super(
         position: Vector2(prop.x, prop.y),
@@ -202,11 +257,13 @@ class InteriorPropBlock extends RectangleComponent implements Interactable {
   @override
   Vector2 get interactPosition => center;
 
-  /// Body contact: the furniture's box plus a small margin, so standing right
-  /// against a bench / pew / sofa counts as touching it. Collision stops the
-  /// feet just outside the solid, which is what the margin covers.
+  /// Body contact: a generous halo around all four sides of the furniture,
+  /// so brushing ANY outside surface (top, bottom, left, right) triggers
+  /// it. Collision stops the feet just outside the solid, which is what
+  /// the margin covers. Overlapping zones resolve to the nearest target
+  /// by distance.
   @override
-  Rect get touchRect => toRect().inflate(24);
+  Rect get touchRect => toRect().inflate(64);
 
   @override
   Future<void> onInteract(LifeInteractContext ctx) async {
@@ -227,6 +284,39 @@ class InteriorPropBlock extends RectangleComponent implements Interactable {
 
   @override
   void render(Canvas canvas) {
+    // Sprite art replaces the flat rect + text label (the art speaks for
+    // itself). Contain-fit: never crops, transparent margins blend into
+    // the room floor. No menu highlight on art: the stroke reads as a
+    // frame around detailed sprites, and the touch button already names
+    // the action (it stays for procedurally drawn props).
+    final sprite = _sprite;
+    if (sprite != null) {
+      // Rotated art (e.g. the dining table turned 90° CCW): spin the
+      // canvas around the rect center, then fit into the swapped box.
+      // Positive [artTurns] = counter-clockwise.
+      if (prop.artTurns != 0) {
+        final src = sprite.srcSize;
+        final eff = Vector2(size.y, size.x);
+        final fit = (eff.x / src.x < eff.y / src.y)
+            ? eff.x / src.x
+            : eff.y / src.y;
+        final drawSize = Vector2(src.x * fit, src.y * fit);
+        canvas.save();
+        canvas.translate(size.x / 2, size.y / 2);
+        canvas.rotate(-math.pi / 2 * prop.artTurns);
+        sprite.render(canvas, position: -drawSize / 2, size: drawSize);
+        canvas.restore();
+        return;
+      }
+      final src = sprite.srcSize;
+      final fit = (size.x / src.x < size.y / src.y)
+          ? size.x / src.x
+          : size.y / src.y;
+      final drawSize = Vector2(src.x * fit, src.y * fit);
+      final offset = (size - drawSize) / 2;
+      sprite.render(canvas, position: offset, size: drawSize);
+      return;
+    }
     super.render(canvas);
     final label = prop.label;
     if (label == null || label.isEmpty) return;
@@ -248,6 +338,51 @@ class InteriorPropBlock extends RectangleComponent implements Interactable {
       fontSize: 20,
       shadow: true,
     );
+  }
+}
+
+/// Floating trigger point over a furniture prop: a gently pulsing gold
+/// ring that marks exactly where an interaction lives. Purely visual —
+/// never solid, never an interactable itself.
+class TriggerMarker extends PositionComponent {
+  double _phase = 0.0;
+
+  TriggerMarker({required Vector2 at})
+    : super(
+        position: at,
+        size: Vector2(48, 48),
+        anchor: Anchor.center,
+        // Above furniture and the player: the trigger point must stay
+        // visible even when its prop is drawn over the player.
+        priority: 102,
+      );
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    _phase += dt * 2.5;
+  }
+
+  @override
+  void render(Canvas canvas) {
+    final pulse = (math.sin(_phase) + 1) / 2; // 0..1
+    canvas.save();
+    canvas.translate(0, math.sin(_phase) * 4);
+    final center = Offset(size.x / 2, size.y / 2);
+    canvas.drawCircle(
+      center,
+      10 + 7 * pulse,
+      Paint()
+        ..color = Colors.white.withAlpha((40 + 120 * (1 - pulse)).toInt())
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3,
+    );
+    canvas.drawCircle(
+      center,
+      4,
+      Paint()..color = Colors.white.withAlpha(220),
+    );
+    canvas.restore();
   }
 }
 

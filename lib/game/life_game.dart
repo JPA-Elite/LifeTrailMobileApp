@@ -299,6 +299,11 @@ class LifeGame extends FlameGame {
 
   @override
   void update(double dt) {
+    // Clamp wild time steps after hitches (shader compiles on a fresh
+    // interior entry, GC, app resume): an unclamped dt teleports the
+    // player deep into furniture and the snap-back correction reads as
+    // screen shake. 50ms keeps motion smooth without visible slowdown.
+    if (dt > 0.05) dt = 0.05;
     // Feed this frame's joystick input to the player before it moves.
     final hero = player;
     final stick = joystick;
@@ -350,7 +355,12 @@ class LifeGame extends FlameGame {
     playerMapPosition.value = Vector2(hero.position.x, hero.position.y);
 
     // Feed the town's traffic: cars halt when the player is on a zebra.
-    if (world == town) town?.playerPosition = hero.position;
+    // Feed interiors too: furniture depth-sorts against the player.
+    if (world == town) {
+      town?.playerPosition = hero.position;
+    } else if (world is InteriorWorld) {
+      world.playerPosition = hero.position;
+    }
 
     // Keep the figure inside the current scene.
     final bounds = world.worldSize;
@@ -370,7 +380,12 @@ class LifeGame extends FlameGame {
     clampToScene();
 
     Interactable? best;
-    var bestDist = 150.0;
+    // No fixed radius cap: candidacy is gated by feet-overlap with the
+    // target's touch zone (below), and the nearest overlapping target
+    // wins. A fixed cap broke big furniture: the bed/kitchen/TV centers
+    // sit 170-270px from any reachable touch point, so they could never
+    // trigger no matter how the player rubbed against them.
+    var bestDist = double.infinity;
     // Touch-only: the player's feet box must overlap the target's touch
     // zone. Same rule for benches, doors, NPCs and furniture — no
     // long-range "nearby" popups.
@@ -395,6 +410,10 @@ class LifeGame extends FlameGame {
     }
     if (world is TownWorld) {
       for (final m in world.children.whereType<NpcMarker>()) {
+        // Same touch-only rule as everything else (see comment above):
+        // without the overlap gate, dropping the radius cap would let a
+        // distant NPC hijack the action button.
+        if (!feet.overlaps(m.touchRect)) continue;
         final d = m.interactPosition.distanceTo(hero.position);
         if (d < bestDist) {
           bestDist = d;
@@ -402,8 +421,25 @@ class LifeGame extends FlameGame {
         }
       }
     }
-    if (best?.interactId != _nearest?.interactId) {
-      _handleNearest(best);
+    // Hysteresis: while the current target is still touched, a challenger
+    // must be clearly closer (40px) to dethrone it. Without this, standing
+    // on a zone boundary flips the target every frame, spamming full-screen
+    // rebuilds (visible stutter) and making the action button flicker.
+    final current = _nearest;
+    if (best?.interactId != current?.interactId) {
+      var keepCurrent = false;
+      if (current != null && best != null) {
+        final stillTouching =
+            !(current is StreetProp && !current.isInteractable) &&
+            feet.overlaps(current.touchRect);
+        if (stillTouching) {
+          final currentDist = current.interactPosition.distanceTo(
+            hero.position,
+          );
+          if (bestDist > currentDist - 40.0) keepCurrent = true;
+        }
+      }
+      _handleNearest(keepCurrent ? current : best);
     }
   }
 
