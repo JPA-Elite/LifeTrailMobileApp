@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../game/state/game_state.dart';
 import '../services/save_service.dart';
@@ -17,6 +18,7 @@ class _SaveLoadState extends ConsumerState<SaveLoadScreen> {
   @override
   void initState() {
     super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _refresh();
   }
 
@@ -28,6 +30,8 @@ class _SaveLoadState extends ConsumerState<SaveLoadScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(title: const Text('Save Slots')),
       body: Center(
         child: ConstrainedBox(

@@ -22,6 +22,23 @@ class GameTime {
     return DayPeriod.night;
   }
 
+  /// True during night scenario (21:00–04:59): buildings lock except home.
+  bool get isNight => period == DayPeriod.night;
+
+  /// Display label for the day scenario: Morning / Afternoon / Evening / Night.
+  String get periodLabel {
+    switch (period) {
+      case DayPeriod.morning:
+        return 'Morning';
+      case DayPeriod.afternoon:
+        return 'Afternoon';
+      case DayPeriod.evening:
+        return 'Evening';
+      case DayPeriod.night:
+        return 'Night';
+    }
+  }
+
   bool get isSchoolDay =>
       weekday != Weekday.saturday && weekday != Weekday.sunday;
 

@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide DayPeriod;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../game/state/game_state.dart';
+import '../models/game_time.dart';
 import 'stat_bar.dart';
 
 class GameHud extends ConsumerWidget {
@@ -60,6 +61,14 @@ class GameHud extends ConsumerWidget {
   }
 
   Widget _clockCard(GameState state) {
+    // Day scenario icon follows GameTime.period so the date/time readout
+    // always matches the town + interior visuals.
+    final periodIcon = switch (state.time.period) {
+      DayPeriod.morning => Icons.wb_sunny_outlined,
+      DayPeriod.afternoon => Icons.wb_sunny,
+      DayPeriod.evening => Icons.wb_twilight,
+      DayPeriod.night => Icons.nights_stay,
+    };
     return _cardShell(
       color: Colors.black.withAlpha(140),
       child: Column(
@@ -76,6 +85,24 @@ class GameHud extends ConsumerWidget {
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
+          ),
+          Row(
+            children: [
+              Icon(periodIcon, color: const Color(0xFFFFD966), size: 12),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  state.time.periodLabel,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 10,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
           Text(
             state.pesoBalance,

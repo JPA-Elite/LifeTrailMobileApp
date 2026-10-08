@@ -39,6 +39,10 @@ class LifeInteractContext {
   /// Sitting on a bench/pew/chair: rests and restores a bit of energy.
   final void Function() sitDown;
 
+  /// Sleeping in a bed: fades to black and wakes up next morning at 07:00
+  /// with full energy (wired in GameScreen).
+  final void Function() sleepInBed;
+
   /// Using an ATM in the town: opens the withdraw dialog.
   final void Function() useAtm;
 
@@ -51,6 +55,7 @@ class LifeInteractContext {
     required this.openLocationMenu,
     required this.exitLocation,
     required this.sitDown,
+    required this.sleepInBed,
     required this.useAtm,
     required this.talkTo,
     required this.pickUp,

@@ -174,6 +174,31 @@ class GameState extends ChangeNotifier {
   bool isLocationOpen(String locationId) =>
       LocationHours.isOpen(locationId, time.weekdayLabel, time.minutes);
 
+  // --- Day scenario / building-entry time cost ---------------------------
+  // Every building entry costs travel + visit time. 90 min per entry, so
+  // 4 entries = 360 min = 6 hours. Time/date (HUD clock) advances and the
+  // town + interior visuals follow the new DayPeriod.
+  static const int minutesPerBuildingEntry = 90;
+
+  int get buildingEntryCount => flags['building_entries'] ?? 0;
+
+  void registerBuildingEntry() {
+    flags['building_entries'] = buildingEntryCount + 1;
+    advanceMinutes(minutesPerBuildingEntry);
+  }
+
+  /// Night scenario: no building may be entered except home, where the
+  /// player sleeps until morning (07:00 next day via [sleep]).
+  bool get isNightTime => time.isNight;
+
+  bool canEnterBuilding(String locationId) {
+    if (locationId == 'home') return true;
+    return !isNightTime;
+  }
+
+  String buildingBlockedMessage(String locationId) =>
+      'It\'s night time (${time.clockLabel}). $locationId is closed. Go home and sleep until morning.';
+
   void eatMeal() => applyActivity('eat');
 
   void study() {

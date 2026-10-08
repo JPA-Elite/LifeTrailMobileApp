@@ -24,6 +24,10 @@ class InteriorProp {
   /// Benches/pews/sofas/chairs are auto-detected even without this flag.
   final bool? sit;
 
+  /// When true, interacting puts the player to sleep until next morning
+  /// (full energy, clock jumps to 07:00). Used by the home bed.
+  final bool sleep;
+
   const InteriorProp({
     required this.x,
     required this.y,
@@ -35,6 +39,7 @@ class InteriorProp {
     this.message,
     this.opensMenu = false,
     this.sit,
+    this.sleep = false,
   });
 }
 
@@ -97,8 +102,8 @@ InteriorLayout buildInterior(String locationId) {
             h: 220,
             color: 0xFF8E7CC3,
             label: 'BED',
-            interactLabel: 'Use the bed',
-            message: 'Your bed. Open the Home menu to sleep or rest.',
+            interactLabel: 'Sleep in bed',
+            sleep: true,
           ),
           InteriorProp(
             x: 520,

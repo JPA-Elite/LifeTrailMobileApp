@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../game/state/game_state.dart';
@@ -34,6 +35,12 @@ class _AtmScreenState extends ConsumerState<AtmScreen> {
   static const _ink = Color(0xFF111417);
 
   int get _pinLen => GameState.atmPinLength;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
 
   void _clearError() {
     if (_error.isNotEmpty) setState(() => _error = '');
@@ -178,7 +185,13 @@ class _AtmScreenState extends ConsumerState<AtmScreen> {
     // Keypad lives only on entry steps; menu/receipt use big buttons.
     final showKeys = _step != _AtmStep.menu && _step != _AtmStep.receipt;
     return Scaffold(
+      extendBody: true,
+      extendBodyBehindAppBar: true,
+      resizeToAvoidBottomInset: false,
+      backgroundColor: const Color(0xFF0D1B16),
       body: Container(
+        width: double.infinity,
+        height: double.infinity,
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,

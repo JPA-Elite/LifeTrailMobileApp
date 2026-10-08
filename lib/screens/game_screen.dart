@@ -52,6 +52,11 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   String? _error;
   final _save = PrefsSaveService();
 
+  /// Sleep transition: fades the whole screen to black, advances to next
+  /// morning, then fades back. While [_sleeping] the overlay blocks input.
+  bool _sleeping = false;
+  double _sleepFade = 0.0;
+
   /// Raw two-finger tracking for pinch zoom, scoped to the GameWidget.
   /// Taps on buttons/HUD/dialogs hit-test above the game, so they never
   /// enter this tracker. A pinch engages ONLY when both fingers land
@@ -177,13 +182,17 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         onNearestChanged: (n) => setState(() => _nearest = n),
         // Walking through a door swaps the Flame world for the interior
         // scene, so close the action sheet: inside, the room's own
-        // activity point opens it again.
-        onEnterLocation: (id) => setState(() => _locationSheet = null),
+        // activity point opens it again. Entry also advances 90 min and
+        // is blocked at night except for home (sleep until morning).
+        canEnterLocation: (id) =>
+            ref.read(gameStateProvider).canEnterBuilding(id),
+        onEnterLocation: _handleEnterLocation,
         onOpenLocationMenu: (id) => setState(() => _locationSheet = id),
         onLeftLocation: (id) => setState(() => _locationSheet = null),
         onTalkTo: _talkTo,
         onMessage: (m) => _flashMessage(m),
         onSitDown: _performSitDown,
+        onSleepInBed: _sleepInBed,
         onUseAtm: _openAtm,
       );
       if (mounted) setState(() {});
@@ -389,11 +398,53 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
+  /// Bed interaction: confirm, fade to black, sleep to next morning 07:00
+  /// with full energy, then fade back revealing the new day.
+  Future<void> _sleepInBed() async {
+    if (_sleeping) return;
+    final ok = await showSleepConfirmDialog(context);
+    if (!ok || !mounted) return;
+    await _sleepWithTransition();
+  }
+
+  /// Shared sleep transition used by the bed and the Home menu button.
+  /// [onClosePanel] closes the location sheet (menu path only);
+  /// bed path passes null because there is no sheet to close.
+  Future<void> _sleepWithTransition({VoidCallback? onClosePanel}) async {
+    if (_sleeping) return;
+    _sleeping = true;
+    // Fade to black (night → sleep).
+    setState(() => _sleepFade = 1.0);
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+    final gs = ref.read(gameStateProvider);
+    AudioService().sleep();
+    gs.sleep();
+    _refreshNpcMarkers();
+    // Hold black briefly while the clock/HUD already show morning behind it.
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    // Fade back in (morning reveal).
+    setState(() => _sleepFade = 0.0);
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+    setState(() => _sleeping = false);
+    onClosePanel?.call();
+    _flashMessage(
+      'Good morning! Day ${gs.time.day} ${gs.time.clockLabel} ${gs.time.periodLabel}. Fully rested.',
+      seconds: 4,
+    );
+  }
+
   void _openAtm() {
     showDialog(
       context: context,
       builder: (_) => const Dialog.fullscreen(child: AtmScreen()),
-    );
+    ).then((_) {
+      if (mounted) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      }
+    });
   }
 
   void _sitOrInteract() {    final target = _nearest;
@@ -448,13 +499,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     }
   }
 
-  double _nightAlpha() {
-    final gs = ref.watch(gameStateProvider);
-    final h = gs.time.hour;
-    if (h >= 6 && h < 17) return 0.0;
-    if (h >= 17 && h < 19) return 0.15;
-    if (h >= 19 || h < 5) return 0.42;
-    return 0.05;
+  void _handleEnterLocation(String id) {
+    // Every building entry costs 90 min (4 entries = 6 hrs). Advances the
+    // clock so town + interior visuals move through Morning → Afternoon →
+    // Evening → Night, then refreshes NPC schedules for the new time.
+    final gs = ref.read(gameStateProvider);
+    gs.registerBuildingEntry();
+    _refreshNpcMarkers();
+    setState(() => _locationSheet = null);
+    _flashMessage(
+      'Entered $id (+1h30m) — Day ${gs.time.day} ${gs.time.clockLabel} ${gs.time.periodLabel}',
+      seconds: 4,
+    );
   }
 
   @override
@@ -462,11 +518,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final gs = ref.watch(gameStateProvider);
     final game = _game;
     if (game != null) {
-      game.setNightAlpha(_nightAlpha());
+      game.setDayPeriod(gs.time.period);
       game.setRunning(_running);
     }
 
     return Scaffold(
+      extendBody: true,
+      extendBodyBehindAppBar: true,
+      resizeToAvoidBottomInset: false,
+      backgroundColor: Colors.black,
       body: Stack(
         children: [
           if (_error != null)
@@ -608,6 +668,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               onClose: () => setState(() => _locationSheet = null),
               onLeave: _leaveLocation,
               onMessage: (m) => _flashMessage(m),
+              onSleep: () => _sleepWithTransition(
+                onClosePanel: () => setState(() => _locationSheet = null),
+              ),
             ),
           // Balanced status chip: centered at the bottom so it never
           // overlaps the joystick (bottom-left) or action buttons
@@ -629,6 +692,31 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 ),
               ),
             ),
+          // Sleep transition: fades the full screen to black, holds while
+          // the clock jumps to next morning, then fades back. Blocks input
+          // while visible so the player can't walk mid-sleep. The card is
+          // the same night-themed design as the sleep confirm modal.
+          if (_sleeping || _sleepFade > 0)
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: !_sleeping,
+                child: AnimatedOpacity(
+                  opacity: _sleepFade,
+                  duration: const Duration(milliseconds: 800),
+                  child: Container(
+                    color: Colors.black,
+                    child: const Center(
+                      child: _SleepNightCard(
+                        title: 'Sleeping…',
+                        message:
+                            'Drifting off… you wake up at 07:00 Morning fully rested.',
+                        showWakePill: false,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -637,35 +725,43 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   void _openPhone() {
     final game = _game;
     if (game == null) return;
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
+      enableDrag: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _PhoneSheet(
         position: game.playerMapPosition,
         scene: game.miniMapScene,
       ),
-    );
+    ).then((_) {
+      if (mounted) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      }
+    });
   }
 
   void _openTownMap() {
     final game = _game;
     if (game == null) return;
-    final screenW = MediaQuery.of(context).size.width;
+    final size = MediaQuery.of(context).size;
     showDialog(
       context: context,
       builder: (ctx) => Dialog.fullscreen(
         backgroundColor: const Color(0xFF111417),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
                   children: [
                     const Expanded(
                       child: Text(
-                        'Town Map',
+                        'Town Map — tap Close to return',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white,
@@ -687,8 +783,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       child: MiniMap(
                         position: game.playerMapPosition,
                         scene: game.miniMapScene,
-                        width: (screenW - 64).clamp(280.0, 560.0),
-                        mapHeightMax: 2000,
+                        width: (size.width - 24).clamp(280.0, 900.0),
+                        mapHeightMax: size.height - 120,
                       ),
                     ),
                   ),
@@ -698,7 +794,11 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           ),
         ),
       ),
-    );
+    ).then((_) {
+      if (mounted) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      }
+    });
   }
 
   /// Shared pretty confirm dialog used by sleep / skip / work / eat prompts.
@@ -755,17 +855,203 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 }
 
+/// Sleep confirm styled exactly like the conversation modal (Talk to Ben):
+/// cream gradient card, green avatar, dark text bubble, green Sleep +
+/// grey Cancel buttons. Used by the bed and the Home menu sleep button.
+///
+/// Top-level (not a static) so widget tests can open the real dialog and
+/// audit it for stray lines/borders.
+Future<bool> showSleepConfirmDialog(BuildContext context) async {
+  final confirmed =
+      await showDialog<bool>(
+        context: context,
+        barrierDismissible: true,
+        // No backdrop outside the modal: the game stays fully visible
+        // behind the sleep card.
+        barrierColor: Colors.transparent,
+        builder: (ctx) => Center(
+          child: SingleChildScrollView(
+            child: _SleepNightCard(
+              title: 'Time to rest?',
+              message:
+                  'Drift off now and wake up fresh at 07:00 in the morning, fully rested.',
+              onCancel: () => Navigator.of(ctx).pop(false),
+              onSleep: () => Navigator.of(ctx).pop(true),
+            ),
+          ),
+        ),
+      ) ??
+      false;
+  return confirmed;
+}
+
+/// Night-themed sleep card shared by the sleep confirm modal and the
+/// sleeping transition overlay: glowing moon, cream title, soft message,
+/// wake-up pill, green Sleep + quiet Cancel. Deliberately line-free: no
+/// borders, dividers, progress bars, grabbers, or underlined text.
+class _SleepNightCard extends StatelessWidget {
+  final String title;
+  final String message;
+  final bool showWakePill;
+  final VoidCallback? onCancel;
+  final VoidCallback? onSleep;
+
+  const _SleepNightCard({
+    required this.title,
+    required this.message,
+    this.showWakePill = true,
+    this.onCancel,
+    this.onSleep,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 340),
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF1E3252), Color(0xFF0E1B30)],
+        ),
+        borderRadius: BorderRadius.all(Radius.circular(28)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF2A4468),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0xFFF4F1DE).withAlpha(60),
+                  blurRadius: 40,
+                  spreadRadius: 4,
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.nights_stay,
+              color: Color(0xFFF4F1DE),
+              size: 44,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFFF7F0DC),
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              decoration: TextDecoration.none,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFFB9C4D6),
+              fontSize: 14,
+              height: 1.5,
+              decoration: TextDecoration.none,
+            ),
+          ),
+          if (showWakePill) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 8,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(20),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.wb_sunny_outlined,
+                    color: Color(0xFFF4F1DE),
+                    size: 16,
+                  ),
+                  SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      '07:00 · Morning',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Color(0xFFF4F1DE),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (onSleep != null) ...[
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onSleep,
+                icon: const Icon(Icons.bedtime, size: 18),
+                label: const Text('Sleep now'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Color(0xFF2E7D5B),
+                  foregroundColor: Colors.white,
+                  side: BorderSide.none,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  padding: EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ],
+          if (onCancel != null)
+            TextButton(
+              onPressed: onCancel,
+              child: const Text(
+                'Not yet',
+                style: TextStyle(
+                  color: Color(0xFF8EA0BC),
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _LocationPanel extends ConsumerWidget {
   final String locationId;
   final VoidCallback onClose;
   final VoidCallback onLeave;
   final void Function(String) onMessage;
 
+  /// Sleep with the fullscreen fade-to-morning transition (wired to
+  /// GameScreen._sleepWithTransition). Falls back to instant sleep if null.
+  final Future<void> Function()? onSleep;
+
   const _LocationPanel({
     required this.locationId,
     required this.onClose,
     required this.onLeave,
     required this.onMessage,
+    this.onSleep,
   });
 
   @override
@@ -1035,19 +1321,20 @@ class _LocationPanel extends ConsumerWidget {
             },
             enabled: gs.canDoActivity('socialize'),
           ),
-          btn('Sleep → next day (saves)', () {
-            confirmAnd(
-              'Sleep until morning?',
-              'You will wake up at 07:00 with full energy. The game saves.',
-              Icons.bedtime,
-              () {
-                AudioService().sleep();
-                gs.sleep();
-                onMessage('Day ${gs.time.day} begins. Energy restored.');
-                onClose();
-              },
-              confirmLabel: 'Sleep',
-            );
+          btn('Sleep → morning 07:00 (saves)', () async {
+            final ok =
+                await showSleepConfirmDialog(context);
+            if (!ok) return;
+            onClose();
+            if (onSleep != null) {
+              await onSleep!();
+            } else {
+              AudioService().sleep();
+              gs.sleep();
+              onMessage(
+                'Morning! Day ${gs.time.day} ${gs.time.clockLabel} ${gs.time.periodLabel}. Energy restored.',
+              );
+            }
           }),
         ];
       case 'school':
@@ -1507,8 +1794,10 @@ class _PhoneSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final gs = ref.watch(gameStateProvider);
     final size = MediaQuery.of(context).size;
-    final sheetW = size.width * 0.9;
-    final sheetH = (size.height * 0.78).clamp(420.0, 640.0);
+    final sheetW = (size.width * 0.92).clamp(280.0, 560.0);
+    // Landscape phones are short (~360px tall): 78% with a 420 minimum
+    // overflowed the screen. Fit inside the available height instead.
+    final sheetH = (size.height * 0.92).clamp(300.0, 640.0);
     return SafeArea(
       child: Center(
         child: Container(
@@ -1760,21 +2049,22 @@ class _PhoneSheet extends ConsumerWidget {
   }
 
   void _phoneFullMap(BuildContext context) {
-    final screenW = MediaQuery.of(context).size.width;
+    final size = MediaQuery.of(context).size;
     showDialog(
       context: context,
       builder: (ctx) => Dialog.fullscreen(
         backgroundColor: const Color(0xFF111417),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
                   children: [
                     const Expanded(
                       child: Text(
-                        'Town Map',
+                        'Town Map — tap Close to return',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white,
@@ -1796,8 +2086,8 @@ class _PhoneSheet extends ConsumerWidget {
                       child: MiniMap(
                         position: position,
                         scene: scene,
-                        width: (screenW - 64).clamp(280.0, 560.0),
-                        mapHeightMax: 2000,
+                        width: (size.width - 24).clamp(280.0, 900.0),
+                        mapHeightMax: size.height - 120,
                       ),
                     ),
                   ),
@@ -1828,6 +2118,8 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
     final questions = GameDataService().quizBySubject[widget.subject] ?? [];
     if (questions.isEmpty) {
       return Scaffold(
+        extendBody: true,
+        extendBodyBehindAppBar: true,
         appBar: AppBar(title: const Text('Quiz')),
         body: const Center(child: Text('No questions yet.')),
       );
@@ -1835,6 +2127,8 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
     final q = questions[_index % questions.length];
     final choices = (q['choices'] as List).cast<String>();
     return Scaffold(
+      extendBody: true,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(title: Text('${widget.subject} quiz')),
       body: Center(
         child: ConstrainedBox(
@@ -1919,6 +2213,8 @@ class _CafeGameState extends ConsumerState<CafeGameScreen> {
           ? 270
           : 210;
       return Scaffold(
+        extendBody: true,
+        extendBodyBehindAppBar: true,
         appBar: AppBar(title: const Text('Shift complete')),
         body: Center(
           child: Card(
@@ -1959,6 +2255,8 @@ class _CafeGameState extends ConsumerState<CafeGameScreen> {
     }
     final order = _orders[_customer % _orders.length];
     return Scaffold(
+      extendBody: true,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: Text('Café shift ${_customer + 1}/$_total · Score $_score'),
       ),

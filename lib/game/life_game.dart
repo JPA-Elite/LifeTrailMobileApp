@@ -3,7 +3,8 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import 'package:flame/experimental.dart';
 import 'package:flame/game.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide DayPeriod;
+import '../models/game_time.dart';
 import 'player/player_component.dart';
 import 'world/feet_collision.dart';
 import 'world/town_world.dart';
@@ -31,6 +32,10 @@ class LifeGame extends FlameGame {
   /// Sitting restores energy via the app's GameState (wired in GameScreen).
   /// Defaults to a no-op so unit tests can construct LifeGame without it.
   final void Function() onSitDown;
+
+  /// Sleeping in the home bed: fades to morning via GameScreen.
+  /// Defaults to a no-op so unit tests can construct LifeGame without it.
+  final void Function() onSleepInBed;
 
   /// Using the town ATM (wired in GameScreen, no-op in tests).
   final void Function() onUseAtm;
@@ -61,6 +66,16 @@ class LifeGame extends FlameGame {
   static const double dayNightAlphaDay = 0.0;
   static const double dayNightAlphaNight = 0.45;
   double nightAlpha = 0.0;
+
+  /// Tint drawn with [nightAlpha]. Changes per DayPeriod so morning reads
+  /// bright, evening reads dusk-orange, and night reads dark blue — both
+  /// in town and inside buildings (render overlay covers the active world).
+  Color dayNightTint = const Color.fromRGBO(10, 10, 60, 1.0);
+
+  /// Optional gate checked before swapping to an interior (wired in
+  /// GameScreen to GameState.canEnterBuilding). When it returns false the
+  /// door shows [onMessage] and the player stays outside.
+  bool Function(String locationId)? canEnterLocation;
 
   /// Default (fitted) zoom captured on the first pinch; the clamp stays
   /// relative to this across gestures so repeated pinches can't creep
@@ -94,9 +109,12 @@ class LifeGame extends FlameGame {
     required this.onTalkTo,
     required this.onMessage,
     void Function()? onSitDown,
+    void Function()? onSleepInBed,
     void Function()? onUseAtm,
     Random? random,
+    this.canEnterLocation,
   }) : onSitDown = onSitDown ?? (() {}),
+       onSleepInBed = onSleepInBed ?? (() {}),
        onUseAtm = onUseAtm ?? (() {}),
        random = random ?? Random();
 
@@ -106,6 +124,7 @@ class LifeGame extends FlameGame {
     openLocationMenu: onOpenLocationMenu,
     exitLocation: exitLocation,
     sitDown: onSitDown,
+    sleepInBed: onSleepInBed,
     useAtm: onUseAtm,
     talkTo: onTalkTo,
     pickUp: onMessage,
@@ -164,7 +183,14 @@ class LifeGame extends FlameGame {
   }
 
   /// Walk through a building door: swap the town for that building's interior.
+  /// Blocked at night for every building except home (see GameState).
   Future<void> enterLocation(String locationId) async {
+    if (canEnterLocation != null && !(canEnterLocation!(locationId))) {
+      onMessage(
+        'It\'s night time. $locationId is closed. Go home and sleep until morning.',
+      );
+      return;
+    }
     final hero = player;
     if (hero == null || !isLoaded || _interiorId == locationId) return;
     final layout = buildInterior(locationId);
@@ -364,6 +390,31 @@ class LifeGame extends FlameGame {
     nightAlpha = alpha.clamp(0.0, 0.55);
   }
 
+  /// Day scenario visuals: morning = bright, afternoon = bright warm,
+  /// evening = dusk orange, night = dark blue. Called every frame from
+  /// GameScreen with the current GameTime period so town + interiors
+  /// always match the clock. Keeps [setNightAlpha] working for tests.
+  void setDayPeriod(DayPeriod period) {
+    switch (period) {
+      case DayPeriod.morning:
+        dayNightTint = const Color.fromRGBO(255, 244, 214, 1.0);
+        nightAlpha = 0.0;
+        break;
+      case DayPeriod.afternoon:
+        dayNightTint = const Color.fromRGBO(255, 250, 235, 1.0);
+        nightAlpha = 0.0;
+        break;
+      case DayPeriod.evening:
+        dayNightTint = const Color.fromRGBO(150, 70, 20, 1.0);
+        nightAlpha = 0.22;
+        break;
+      case DayPeriod.night:
+        dayNightTint = const Color.fromRGBO(10, 10, 60, 1.0);
+        nightAlpha = 0.45;
+        break;
+    }
+  }
+
   /// Drag-pan the view (single finger on the open map): stops following
   /// the player so the user can explore. Cancels any snap-back glide.
   /// The distance accumulates and update() glides through it smoothly.
@@ -445,7 +496,8 @@ class LifeGame extends FlameGame {
       final size = canvasSize;
       canvas.drawRect(
         Rect.fromLTWH(0, 0, size.x, size.y),
-        Paint()..color = Color.fromRGBO(10, 10, 60, nightAlpha),
+        Paint()
+          ..color = dayNightTint.withValues(alpha: nightAlpha),
       );
     }
   }

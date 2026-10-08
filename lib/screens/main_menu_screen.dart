@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../game/state/game_state.dart';
 import '../services/game_data_service.dart';
@@ -21,6 +22,9 @@ class _MainMenuState extends ConsumerState<MainMenuScreen> {
   @override
   void initState() {
     super.initState();
+    // Fullscreen: re-hide status/nav bars every time the menu shows
+    // (dialogs and route pushes can reveal them).
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _check();
   }
 
@@ -115,7 +119,13 @@ class _MainMenuState extends ConsumerState<MainMenuScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
+      extendBodyBehindAppBar: true,
+      resizeToAvoidBottomInset: false,
+      backgroundColor: const Color(0xFF1B3A2D),
       body: Container(
+        width: double.infinity,
+        height: double.infinity,
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -123,7 +133,8 @@ class _MainMenuState extends ConsumerState<MainMenuScreen> {
             colors: [Color(0xFF1B3A2D), Color(0xFF2E7D5B), Color(0xFF8FC1A3)],
           ),
         ),
-        child: Center(
+        child: SafeArea(
+          child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
             child: Padding(
@@ -210,6 +221,7 @@ class _MainMenuState extends ConsumerState<MainMenuScreen> {
                 ],
               ),
             ),
+          ),
           ),
         ),
       ),

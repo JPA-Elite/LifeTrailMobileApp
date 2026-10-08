@@ -210,6 +210,10 @@ class InteriorPropBlock extends RectangleComponent implements Interactable {
 
   @override
   Future<void> onInteract(LifeInteractContext ctx) async {
+    if (prop.sleep) {
+      ctx.sleepInBed();
+      return;
+    }
     if (_sittable) {
       ctx.sitDown();
       return;
