@@ -69,6 +69,11 @@ class MiniMap extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    const Icon(
+                      Icons.zoom_out_map,
+                      size: 12,
+                      color: Colors.white54,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 5),

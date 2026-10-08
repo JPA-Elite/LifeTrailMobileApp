@@ -513,7 +513,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             ),
           GameHud(onSave: _quickSave),
           // Map of wherever the player currently is: the town, or the room
-          // of the building they walked into.
+          // of the building they walked into. Tapping it opens the
+          // fullscreen town map modal.
           if (game != null)
             Align(
               alignment: Alignment.topRight,
@@ -523,9 +524,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 right: false,
                 child: Padding(
                   padding: const EdgeInsets.only(top: 78, right: 10),
-                  child: MiniMap(
-                    position: game.playerMapPosition,
-                    scene: game.miniMapScene,
+                  child: GestureDetector(
+                    onTap: _openTownMap,
+                    child: MiniMap(
+                      position: game.playerMapPosition,
+                      scene: game.miniMapScene,
+                    ),
                   ),
                 ),
               ),
@@ -640,6 +644,59 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       builder: (_) => _PhoneSheet(
         position: game.playerMapPosition,
         scene: game.miniMapScene,
+      ),
+    );
+  }
+
+  void _openTownMap() {
+    final game = _game;
+    if (game == null) return;
+    final screenW = MediaQuery.of(context).size.width;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog.fullscreen(
+        backgroundColor: const Color(0xFF111417),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Town Map',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      icon: const Icon(Icons.close, color: Colors.white),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      child: MiniMap(
+                        position: game.playerMapPosition,
+                        scene: game.miniMapScene,
+                        width: (screenW - 64).clamp(280.0, 560.0),
+                        mapHeightMax: 2000,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
