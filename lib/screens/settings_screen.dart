@@ -35,7 +35,7 @@ class _SettingsState extends State<SettingsScreen> {
               ),
               const ListTile(
                 title: Text('Orientation'),
-                subtitle: Text('Landscape only (locked at startup).'),
+                subtitle: Text('Landscape only (auto-rotates left/right).'),
               ),
               const ListTile(
                 title: Text('Credits'),

@@ -82,6 +82,11 @@ class LifeGame extends FlameGame {
   /// the range outward.
   double _defaultZoom = 0;
 
+  /// Last orientation class seen in [onGameResize] (null until the first
+  /// layout). Rotating between portrait and landscape refits the camera;
+  /// staying in one class preserves the player's pinch zoom.
+  bool? _wasLandscape;
+
   /// Smoothed zoom target. Finger events only move the target; update()
   /// eases the real zoom toward it every frame, so delayed or dropped
   /// touch events on a phone read as glide instead of stutter.
@@ -173,13 +178,29 @@ class LifeGame extends FlameGame {
     camera.viewport.add(stick);
 
     camera.viewfinder.anchor = Anchor.center;
-    // Force full screen width on any landscape phone: constrain the
-    // visible width to 1280 world units and leave height unconstrained
-    // (0). Flame then picks zoom = viewportWidth / 1280, so the map
-    // always stretches edge-to-edge with no left/right bars.
-    camera.viewfinder.visibleGameSize = Vector2(1280, 0);
+    // Fit the world to the current orientation (auto-rotate): landscape
+    // constrains width to 1280 world units (edge-to-edge, no side bars),
+    // portrait constrains height instead so the view stays at the same
+    // world scale instead of shrinking to a postage stamp.
+    _applyVisibleFit();
     _applyCameraBounds(newTown);
     camera.follow(hero);
+  }
+
+  /// Fits the camera to the current canvas orientation. Landscape locks
+  /// the visible width (Flame derives zoom from it); portrait locks the
+  /// visible height. Resets the smoothed pinch target so it can't fight
+  /// the new fit. No-op before the first layout (size 0).
+  void _applyVisibleFit() {
+    final s = size;
+    if (s.x <= 0 || s.y <= 0) return;
+    if (s.x >= s.y) {
+      camera.viewfinder.visibleGameSize = Vector2(1280, 0);
+    } else {
+      camera.viewfinder.visibleGameSize = Vector2(0, 1280);
+    }
+    _defaultZoom = camera.viewfinder.zoom;
+    _targetZoom = 0;
   }
 
   /// Walk through a building door: swap the town for that building's interior.
@@ -474,6 +495,15 @@ class LifeGame extends FlameGame {
   @override
   void onGameResize(Vector2 size) {
     super.onGameResize(size);
+    // Rotating between portrait and landscape refits the camera to the
+    // new orientation class so the world scale stays right. Resizing
+    // within one class preserves the player's pinch zoom instead.
+    final landscape = size.x >= size.y;
+    if (_wasLandscape == null || _wasLandscape != landscape) {
+      _wasLandscape = landscape;
+      _applyVisibleFit();
+      return;
+    }
     // Rotation/resize refits the zoom from visibleGameSize: carry the
     // user's relative zoom over to the new fit instead of dropping it,
     // so a walked/zoomed view stays put (permanent) instead of
