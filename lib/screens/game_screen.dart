@@ -485,7 +485,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             children: [
               Icon(Icons.check_circle, color: Color(0xFF9CCC65)),
               SizedBox(width: 10),
-              Text('Game saved (Slot 1)'),
+              Text(
+                'Game saved (Slot 1)',
+                style: TextStyle(color: Colors.white),
+              ),
             ],
           ),
           behavior: SnackBarBehavior.floating,
