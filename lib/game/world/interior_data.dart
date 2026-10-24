@@ -56,6 +56,31 @@ class InteriorProp {
   });
 }
 
+/// A glazed window set into the room's back wall. Purely decorative:
+/// windows never collide or trigger, they just let daylight into the room.
+class InteriorWindow {
+  /// Left edge, in room units along the back wall.
+  final double x;
+
+  /// Glass size (the wooden frame/casing is drawn around it).
+  final double width;
+  final double height;
+
+  /// Y offset from the top of the room (clamped inside the back wall).
+  final double y;
+
+  /// Side drapes hanging beside the glass.
+  final bool curtains;
+
+  const InteriorWindow({
+    required this.x,
+    this.width = 250,
+    this.height = 112,
+    this.y = 20,
+    this.curtains = true,
+  });
+}
+
 class InteriorLayout {
   final String id;
   final String title;
@@ -73,6 +98,9 @@ class InteriorLayout {
 
   final List<InteriorProp> props;
 
+  /// Decorative windows on the back wall (drawn above the wall paint).
+  final List<InteriorWindow> windows;
+
   final String entryMessage;
   final String exitMessage;
 
@@ -85,6 +113,7 @@ class InteriorLayout {
     required this.props,
     required this.entryMessage,
     required this.exitMessage,
+    this.windows = const [],
     this.width = 1600,
     this.height = 1000,
     this.doorWidth = 240,
@@ -107,6 +136,13 @@ InteriorLayout buildInterior(String locationId) {
         trimColor: 0xFFC79A6B,
         entryMessage: 'You step inside. It smells like home.',
         exitMessage: 'You head back outside.',
+        // Sunlight through three glazed windows on the pink back wall:
+        // a wide centre picture window flanked by two narrower ones.
+        windows: [
+          InteriorWindow(x: 330, width: 230, curtains: true),
+          InteriorWindow(x: 650, width: 300, height: 120, y: 14),
+          InteriorWindow(x: 1040, width: 230, curtains: true),
+        ],
         // Realistic setup: bedroom row on top (bed by the left wall,
         // closet beside it, kitchen anchored top-right), living row below
         // (sofa west, TV scene center facing it, dining table east).

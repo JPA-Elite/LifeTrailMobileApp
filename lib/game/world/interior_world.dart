@@ -1,6 +1,7 @@
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'interactable.dart';
 import 'interior_data.dart';
 import 'life_world.dart';
@@ -92,6 +93,11 @@ class InteriorWorld extends LifeWorld {
         paint: trim,
       ),
     );
+
+    // Glazed windows sit on the back wall, above every piece of furniture.
+    for (final window in layout.windows) {
+      add(InteriorWindowBlock(spec: window, layout: layout));
+    }
 
     for (final prop in layout.props) {
       final block = InteriorPropBlock(prop: prop, locationId: layout.id);
@@ -200,6 +206,312 @@ class ExitDoor extends PositionComponent implements Interactable {
       Paint()..color = const Color(0xFF241A15),
     );
     drawCenteredLabel(canvas, size, 'EXIT', color: Colors.white, fontSize: 20);
+  }
+}
+
+/// A wooden-framed, glazed window set into the back wall of a room.
+///
+/// Hand-drawn with the room's trim colour for the casing and mullions.
+/// The glass is a sky-blue gradient with soft clouds, a hedge line, and
+/// slanted reflection bands so it reads as real glazing rather than a
+/// flat blue rectangle. Sheer drapes hang at the sides. Purely visual:
+/// no collision, no interaction.
+class InteriorWindowBlock extends PositionComponent {
+  final InteriorWindow spec;
+  final InteriorLayout layout;
+
+  InteriorWindowBlock({required this.spec, required this.layout})
+    : super(
+        position: Vector2(spec.x, spec.y),
+        size: Vector2(spec.width, spec.height),
+        // Above the wall paint, below furniture (priority 50/101).
+        priority: 1,
+      );
+
+  static Color _shade(Color c, double amount) => amount >= 0
+      ? Color.lerp(c, Colors.black, amount)!
+      : Color.lerp(c, Colors.white, -amount)!;
+
+  @override
+  void render(Canvas canvas) {
+    final w = size.x;
+    final h = size.y;
+    final wood = Color(layout.trimColor);
+    final woodDark = _shade(wood, 0.38);
+    final woodLight = _shade(wood, -0.28);
+
+    // Soft shadow the casing casts onto the wall (down and to the right).
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(6, 8, w + 10, h + 12),
+        const Radius.circular(12),
+      ),
+      Paint()..color = const Color(0x22000000),
+    );
+
+    // Outer casing, then the lighter face, giving the frame depth.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, w, h),
+        const Radius.circular(10),
+      ),
+      Paint()..color = woodDark,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(3, 3, w - 6, h - 6),
+        const Radius.circular(8),
+      ),
+      Paint()..color = wood,
+    );
+
+    final glassRect = Rect.fromLTWH(12, 12, w - 24, h - 24);
+    final glass = RRect.fromRectAndRadius(
+      glassRect,
+      const Radius.circular(4),
+    );
+
+    // Sky gradient behind the glass.
+    canvas.drawRRect(
+      glass,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          glassRect.topCenter,
+          glassRect.bottomCenter,
+          const [Color(0xFFD6EEFB), Color(0xFF9CCFEA), Color(0xFF6FA6C6)],
+          const [0.0, 0.55, 1.0],
+        ),
+    );
+
+    canvas.save();
+    canvas.clipRRect(glass);
+    _drawOutside(canvas, glassRect);
+    _drawReflections(canvas, glassRect);
+    canvas.restore();
+
+    // Glass edge: thin bright inner highlight along the top and left.
+    canvas.drawRRect(
+      glass.deflate(1),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..color = Colors.white.withAlpha(120),
+    );
+
+    // Mullions: one vertical, one horizontal bar split the glazing.
+    final bar = Paint()..color = wood;
+    final barHi = Paint()..color = woodLight;
+    final barShadow = Paint()
+      ..color = Colors.black.withAlpha(45)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+    final vBar = Rect.fromLTWH(w / 2 - 3.5, glassRect.top, 7, glassRect.height);
+    final hBar = Rect.fromLTWH(
+      glassRect.left,
+      glassRect.top + glassRect.height * 0.56,
+      glassRect.width,
+      6,
+    );
+    canvas.drawRect(vBar.shift(const Offset(1.5, 1.5)), Paint()..color = const Color(0x33000000));
+    canvas.drawRect(vBar, bar);
+    canvas.drawRect(hBar.shift(const Offset(1.5, 1.5)), Paint()..color = const Color(0x33000000));
+    canvas.drawRect(hBar, bar);
+    canvas.drawLine(
+      vBar.topLeft + const Offset(2, 0),
+      vBar.bottomLeft + const Offset(2, 0),
+      barHi..strokeWidth = 1.2,
+    );
+    canvas.drawLine(
+      hBar.topLeft + const Offset(0, 2),
+      hBar.topRight + const Offset(0, 2),
+      barHi,
+    );
+    // Drawn stroke on the inside of the casing to seat the glass.
+    canvas.drawRRect(
+      glass.inflate(0.5),
+      barShadow,
+    );
+
+    // Brass latch where the glazing bars cross.
+    canvas.drawCircle(
+      Offset(w / 2, glassRect.top + glassRect.height * 0.56 + 4),
+      3,
+      Paint()..color = const Color(0xFFD9B75C),
+    );
+
+    // Sill under the window, with its own small shadow.
+    final sillRect = Rect.fromLTWH(-8, h - 5, w + 16, 12);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        sillRect.shift(const Offset(0, 5)),
+        const Radius.circular(3),
+      ),
+      Paint()..color = const Color(0x33000000),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(sillRect, const Radius.circular(4)),
+      Paint()..color = woodLight,
+    );
+    canvas.drawLine(
+      sillRect.topLeft + const Offset(4, 1.5),
+      sillRect.topRight + const Offset(-4, 1.5),
+      Paint()
+        ..color = Colors.white.withAlpha(110)
+        ..strokeWidth = 1.6,
+    );
+
+    if (spec.curtains) _drawCurtains(canvas, w, h, woodDark);
+  }
+
+  /// What you see through the glass: clouds and a hedge in the garden.
+  void _drawOutside(Canvas canvas, Rect r) {
+    // Warmer afternoon light pooling near the bottom of the pane.
+    canvas.drawRect(
+      r,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          r.topCenter,
+          r.bottomCenter,
+          [const Color(0x00FFF6D8), const Color(0x22FFF1C9)],
+          const [0.55, 1.0],
+        ),
+    );
+
+    final cloud = Paint()..color = Colors.white.withAlpha(200);
+    void cloudAt(double cx, double cy, double s) {
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(cx, cy),
+          width: 52 * s,
+          height: 16 * s,
+        ),
+        cloud,
+      );
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(cx - 13 * s, cy - 7 * s),
+          width: 30 * s,
+          height: 18 * s,
+        ),
+        cloud,
+      );
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(cx + 12 * s, cy - 8 * s),
+          width: 34 * s,
+          height: 20 * s,
+        ),
+        cloud,
+      );
+    }
+
+    cloudAt(r.left + r.width * 0.24, r.top + r.height * 0.30, 1.0);
+    cloudAt(r.left + r.width * 0.74, r.top + r.height * 0.18, 0.72);
+
+    // Distant hedge line along the bottom of the pane.
+    final hedge = Paint()..color = const Color(0xFF8FBE76);
+    final hedgeDark = Paint()..color = const Color(0xFF6E9A58);
+    canvas.drawRect(
+      Rect.fromLTWH(r.left, r.bottom - 16, r.width, 16),
+      hedgeDark,
+    );
+    for (double cx = r.left - 8; cx < r.right + 14; cx += 24) {
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(cx, r.bottom - 16),
+          width: 34,
+          height: 30,
+        ),
+        hedge,
+      );
+    }
+    // A hint of a tree trunk and canopy behind the hedge.
+    canvas.drawRect(
+      Rect.fromLTWH(r.left + r.width * 0.82, r.bottom - 36, 4, 22),
+      Paint()..color = const Color(0xFF8A6A4B),
+    );
+    canvas.drawCircle(
+      Offset(r.left + r.width * 0.82 + 2, r.bottom - 40),
+      17,
+      Paint()..color = const Color(0xFF74A75F),
+    );
+  }
+
+  /// Slanted white bands that read as sky reflections on the glass.
+  void _drawReflections(Canvas canvas, Rect r) {
+    void band(double start, double width) {
+      final x = r.left + r.width * start;
+      final slope = r.height * 0.6;
+      final path = Path()
+        ..moveTo(x, r.top)
+        ..lineTo(x + r.width * width, r.top)
+        ..lineTo(x + r.width * width - slope, r.bottom)
+        ..lineTo(x - slope, r.bottom)
+        ..close();
+      canvas.drawPath(path, Paint()..color = const Color(0x2EFFFFFF));
+    }
+
+    band(-0.05, 0.22);
+    band(0.42, 0.12);
+  }
+
+  /// Sheer drapes hanging from a rod above the casing.
+  void _drawCurtains(Canvas canvas, double w, double h, Color rodColor) {
+    const rodY = -12.0;
+    final rodPaint = Paint()
+      ..color = rodColor
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      const Offset(-20, rodY),
+      Offset(w + 20, rodY),
+      rodPaint,
+    );
+    final finial = Paint()..color = rodColor;
+    canvas.drawCircle(const Offset(-20, rodY), 5, finial);
+    canvas.drawCircle(Offset(w + 20, rodY), 5, finial);
+
+    final fabric = Paint()..color = const Color(0xE0F4E4D2);
+    final fold = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = const Color(0x2E8A6844);
+
+    final left = Path()
+      ..moveTo(-16, rodY + 2)
+      ..lineTo(22, rodY + 2)
+      ..quadraticBezierTo(16, h * 0.5, 24, h + 6)
+      ..lineTo(-22, h + 6)
+      ..quadraticBezierTo(-14, h * 0.45, -16, rodY + 2)
+      ..close();
+    canvas.drawPath(left, fabric);
+    for (final f in const [0.0, 0.45, 0.9]) {
+      final x = -16 + f * 34;
+      canvas.drawPath(
+        Path()
+          ..moveTo(x, rodY + 6)
+          ..quadraticBezierTo(x + 5, h * 0.5, x + 2, h + 4),
+        fold,
+      );
+    }
+
+    final right = Path()
+      ..moveTo(w + 16, rodY + 2)
+      ..lineTo(w - 22, rodY + 2)
+      ..quadraticBezierTo(w - 16, h * 0.5, w - 24, h + 6)
+      ..lineTo(w + 22, h + 6)
+      ..quadraticBezierTo(w + 14, h * 0.45, w + 16, rodY + 2)
+      ..close();
+    canvas.drawPath(right, fabric);
+    for (final f in const [0.0, 0.45, 0.9]) {
+      final x = w + 16 - f * 34;
+      canvas.drawPath(
+        Path()
+          ..moveTo(x, rodY + 6)
+          ..quadraticBezierTo(x - 5, h * 0.5, x - 2, h + 4),
+        fold,
+      );
+    }
   }
 }
 
