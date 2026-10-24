@@ -1,7 +1,6 @@
 import 'dart:math';
 
 import 'package:flame/components.dart';
-import 'package:flame/experimental.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart' hide DayPeriod;
 import '../models/game_time.dart';
@@ -106,6 +105,18 @@ class LifeGame extends FlameGame {
   /// stays off until the glide converges, so there is never a snap.
   bool _snappingBack = false;
 
+  /// How far (in world units) the player may drift from the centre of the
+  /// screen before the camera starts moving. Thumb tremor on the joystick
+  /// and the one-frame position correction when the feet meet furniture
+  /// are smaller than this, so they can no longer drag the whole scene
+  /// with them and make the screen shiver. Real walking closes the gap
+  /// instantly, so the camera still tracks 1:1 beyond the zone.
+  static const double _followDeadzone = 6.0;
+
+  /// Size of the active scene, used to clamp the camera manually. Kept in
+  /// step in [_applyCameraBounds].
+  Vector2? _cameraWorldSize;
+
   LifeGame({
     required this.onNearestChanged,
     required this.onEnterLocation,
@@ -184,7 +195,7 @@ class LifeGame extends FlameGame {
     // world scale instead of shrinking to a postage stamp.
     _applyVisibleFit();
     _applyCameraBounds(newTown);
-    camera.follow(hero);
+    _followPlayer(instant: true);
   }
 
   /// Fits the camera to the current canvas orientation. Landscape locks
@@ -261,11 +272,73 @@ class LifeGame extends FlameGame {
   }
 
   void _applyCameraBounds(LifeWorld target) {
-    final size = target.worldSize;
-    camera.setBounds(
-      Rectangle.fromLTRB(0, 0, size.x, size.y),
-      considerViewport: true,
-    );
+    _cameraWorldSize = target.worldSize.clone();
+    // Bounds are enforced manually in [_clampCamera] using the *visible*
+    // world size. Flame's `considerViewport` mode measures the raw
+    // viewport in screen pixels, which is only correct at zoom 1: with
+    // `visibleGameSize` driving the zoom it clamps far too early (and can
+    // leave the map edge showing). Its async setup also leaves duplicate
+    // clamp behaviours behind when scenes are swapped. Clearing them here
+    // keeps exactly one, deterministic clamp.
+    camera.setBounds(null);
+  }
+
+  /// Keeps the view inside the active scene using the world size actually
+  /// visible through the viewport (which accounts for pinch zoom). When the
+  /// scene is smaller than the view on an axis, centre it instead of
+  /// producing an inverted clamp range.
+  void _clampCamera() {
+    final world = _cameraWorldSize;
+    if (world == null || !isLoaded) return;
+    final visible = camera.visibleWorldRect.size;
+    if (visible.width <= 0 || visible.height <= 0) return;
+    final cam = camera.viewfinder.position.clone();
+    final halfX = visible.width / 2;
+    final halfY = visible.height / 2;
+    cam.x = world.x <= visible.width
+        ? world.x / 2
+        : cam.x.clamp(halfX, world.x - halfX).toDouble();
+    cam.y = world.y <= visible.height
+        ? world.y / 2
+        : cam.y.clamp(halfY, world.y - halfY).toDouble();
+    camera.viewfinder.position = cam;
+  }
+
+  /// Steady camera follow, run *after* collision resolution so the view
+  /// never follows a position the player was immediately pushed back out
+  /// of. A small central dead zone absorbs joystick tremor and contact
+  /// snap-backs; beyond it the camera tracks the player 1:1.
+  void _updateCamera(double dt) {
+    final hero = player;
+    if (hero == null || _cameraWorldSize == null || !isLoaded) return;
+
+    // Free-look: while the player stands still, leave the view where the
+    // drag left it. Walking glides it back home instead of snapping.
+    if (!_followingPlayer && !hero.isMoving) return;
+    if (!_followingPlayer) {
+      _pendingPan = Vector2.zero();
+      _snappingBack = true;
+    }
+
+    final cam = camera.viewfinder.position.clone();
+    if (_snappingBack) {
+      final toPlayer = hero.position - cam;
+      if (toPlayer.length <= _followDeadzone) {
+        _snappingBack = false;
+        _followingPlayer = true;
+      } else {
+        cam.add(toPlayer * (1 - pow(0.5, dt * 6)).toDouble());
+        camera.viewfinder.position = cam;
+        return;
+      }
+    }
+
+    final delta = hero.position - cam;
+    final distance = delta.length;
+    if (distance > _followDeadzone) {
+      cam.add(delta * ((distance - _followDeadzone) / distance));
+    }
+    camera.viewfinder.position = cam;
   }
 
   void _handleNearest(Interactable? value) {
@@ -333,21 +406,6 @@ class LifeGame extends FlameGame {
       _pendingPan -= step;
     }
 
-    // Joystick walk/run glides a free-looked camera back onto the
-    // player instead of snapping.
-    if (hero != null && hero.isMoving) _followPlayer();
-    if (_snappingBack && hero != null) {
-      final toPlayer = hero.position - camera.viewfinder.position;
-      if (toPlayer.length < 3) {
-        _snappingBack = false;
-        _followingPlayer = true;
-        camera.follow(hero);
-      } else {
-        camera.viewfinder.position +=
-            toPlayer * (1 - pow(0.5, dt * 6)).toDouble();
-      }
-    }
-
     final world = _activeWorld;
     if (!isLoaded || hero == null || world == null) return;
 
@@ -378,6 +436,12 @@ class LifeGame extends FlameGame {
       solids: world.solidBounds(),
     );
     clampToScene();
+
+    // Settle the camera from the *resolved* position only. Following
+    // before collision let the view creep into furniture on contact and
+    // spring back when the player released the stick.
+    _updateCamera(dt);
+    _clampCamera();
 
     Interactable? best;
     // No fixed radius cap: candidacy is gated by feet-overlap with the
@@ -494,7 +558,10 @@ class LifeGame extends FlameGame {
     if (instant) {
       _snappingBack = false;
       _followingPlayer = true;
-      camera.follow(hero);
+      _pendingPan = Vector2.zero();
+      camera.stop();
+      camera.viewfinder.position = hero.position.clone();
+      _clampCamera();
       return;
     }
     // Animated: glide home in update(), engage follow on arrival.
@@ -547,10 +614,7 @@ class LifeGame extends FlameGame {
     final fitted = camera.viewfinder.zoom;
     _defaultZoom = fitted;
     if (_targetZoom > 0) {
-      _targetZoom = _targetZoom.clamp(
-        _defaultZoom * 0.5,
-        _defaultZoom * 3.0,
-      );
+      _targetZoom = _targetZoom.clamp(_defaultZoom * 0.5, _defaultZoom * 3.0);
       camera.viewfinder.zoom = _targetZoom;
     }
   }
@@ -562,8 +626,7 @@ class LifeGame extends FlameGame {
       final size = canvasSize;
       canvas.drawRect(
         Rect.fromLTWH(0, 0, size.x, size.y),
-        Paint()
-          ..color = dayNightTint.withValues(alpha: nightAlpha),
+        Paint()..color = dayNightTint.withValues(alpha: nightAlpha),
       );
     }
   }
