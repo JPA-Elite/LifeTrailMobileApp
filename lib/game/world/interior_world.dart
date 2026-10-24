@@ -518,7 +518,8 @@ class InteriorWindowBlock extends PositionComponent {
 /// A furniture item the player can examine, or that opens the location menu.
 /// Chairs, benches, pews and sofas are sittable: they call `sitDown` so the
 /// player rests and recovers energy.
-class InteriorPropBlock extends RectangleComponent implements Interactable {
+class InteriorPropBlock extends RectangleComponent
+    implements Interactable, RelaxationSeat {
   final InteriorProp prop;
   final String locationId;
 
@@ -550,6 +551,9 @@ class InteriorPropBlock extends RectangleComponent implements Interactable {
 
   @override
   bool get isSeat => _sittable;
+
+  @override
+  bool get opensRelaxScene => prop.relaxScene;
 
   @override
   String get interactId =>

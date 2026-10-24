@@ -21,7 +21,9 @@ import '../widgets/dialogue_box.dart';
 import '../widgets/mini_map.dart';
 import '../models/location_dialogue.dart';
 import '../models/npc_model.dart';
+import '../models/player_model.dart';
 import '../models/quest_model.dart';
+import 'sofa_relax_screen.dart';
 
 /// A tracked map pointer: position + landing time for pinch pairing.
 class _TouchDown {
@@ -426,6 +428,53 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
+  /// Home sofa: open the dedicated relaxation scene. It adds happiness
+  /// every five seconds and closes itself when the bar is full.
+  void _performSofaRelax() {
+    final gs = ref.read(gameStateProvider);
+    if (gs.player.happiness >= PlayerModel.happinessMax) {
+      _flashMessage(
+        'You are already full of happiness — no need to sit down.',
+        seconds: 4,
+      );
+      return;
+    }
+    AudioService().interact();
+    showGeneralDialog<SofaRelaxResult>(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: 'Relax on the sofa',
+      barrierColor: Colors.black.withAlpha(190),
+      transitionDuration: const Duration(milliseconds: 380),
+      pageBuilder: (_, animation, second) => const SofaRelaxScreen(),
+      transitionBuilder: (_, animation, second, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.97, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    ).then((result) {
+      if (!mounted || result == null) return;
+      if (result.reachedFull) {
+        _flashMessage('Happiness full — you feel wonderful!', seconds: 4);
+      } else if (result.gained > 0) {
+        _flashMessage(
+          'You stand up feeling +${result.gained} happier.',
+          seconds: 4,
+        );
+      } else {
+        _flashMessage('You stand up feeling cozy.', seconds: 4);
+      }
+    });
+  }
+
   /// Bed interaction: confirm, fade to black, sleep to next morning 07:00
   /// with full energy, then fade back revealing the new day.
   Future<void> _sleepInBed() async {
@@ -475,8 +524,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     });
   }
 
-  void _sitOrInteract() {    final target = _nearest;
+  void _sitOrInteract() {
+    final target = _nearest;
     if (target == null) return;
+    // The home sofa opens the dedicated relaxation scene; every other
+    // seat keeps the quick sit-and-rest action.
+    if (target is RelaxationSeat) {
+      final seat = target as RelaxationSeat;
+      if (seat.opensRelaxScene) {
+        _performSofaRelax();
+        return;
+      }
+    }
     // Seats are handled on the Flutter side so energy/time actually update.
     if (target.isSeat) {
       _performSitDown();

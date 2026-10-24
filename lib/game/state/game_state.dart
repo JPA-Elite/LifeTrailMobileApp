@@ -118,6 +118,21 @@ class GameState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Adds [delta] happiness (clamped to the maximum) and notifies listeners.
+  /// Returns the resulting value, so timed scenes can stop when the player
+  /// is completely happy without poking at the model directly.
+  int addHappiness(int delta) {
+    final next = (player.happiness + delta)
+        .clamp(0, PlayerModel.happinessMax)
+        .toInt();
+    if (next != player.happiness) {
+      player = player.copyWith(happiness: next);
+      _checkQuestUnlocks();
+      notifyListeners();
+    }
+    return next;
+  }
+
   void addCharm(int delta) {
     player = player.copyWith(charm: player.charm + delta);
     _checkQuestUnlocks();

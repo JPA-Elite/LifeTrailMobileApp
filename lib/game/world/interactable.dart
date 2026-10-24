@@ -23,6 +23,15 @@ abstract class Interactable {
   Future<void> onInteract(LifeInteractContext ctx);
 }
 
+/// Opt-in marker for seats that should open the dedicated relaxation scene
+/// (a full-screen, animated "sit and unwind" experience) instead of the
+/// quick seat rest. Kept separate from [Interactable] so the town's doors,
+/// NPCs and props don't have to implement it.
+abstract interface class RelaxationSeat {
+  /// True when tapping this seat opens the relaxation scene.
+  bool get opensRelaxScene;
+}
+
 class LifeInteractContext {
   final void Function(String message) showMessage;
 

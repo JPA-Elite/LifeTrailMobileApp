@@ -28,6 +28,11 @@ class InteriorProp {
   /// (full energy, clock jumps to 07:00). Used by the home bed.
   final bool sleep;
 
+  /// When true, sitting opens the dedicated full-screen relaxation scene
+  /// (the home sofa: happiness ticks up while the player unwinds) instead
+  /// of the quick seat rest.
+  final bool relaxScene;
+
   /// Optional sprite art for the prop (asset file under assets/images/,
   /// e.g. 'home_bed.png'). Loaded in the background by [InteriorWorld];
   /// the flat color rect is the fallback until it arrives. When art is
@@ -51,6 +56,7 @@ class InteriorProp {
     this.opensMenu = false,
     this.sit,
     this.sleep = false,
+    this.relaxScene = false,
     this.art,
     this.artTurns = 0,
   });
@@ -192,6 +198,7 @@ InteriorLayout buildInterior(String locationId) {
             label: 'SOFA',
             interactLabel: 'Sit on the sofa',
             message: 'A couch facing an old TV set.',
+            relaxScene: true,
             art: 'home_sofa.png',
             // Landscape art turned portrait like the table: faces the TV
             // across the living zone, flush to the far left wall.
