@@ -19,13 +19,18 @@ import '../widgets/game_hud.dart';
 import '../widgets/action_buttons.dart';
 import '../widgets/dialogue_box.dart';
 import '../widgets/mini_map.dart';
+import '../models/cooking.dart';
 import '../models/location_dialogue.dart';
 import '../models/npc_model.dart';
 import '../models/outfit.dart';
 import '../models/player_model.dart';
 import '../models/quest_model.dart';
+import 'cooking_screen.dart';
+import 'dining_table_screen.dart';
 import 'sofa_relax_screen.dart';
+import 'tv_screen.dart';
 import 'wardrobe_screen.dart';
+import 'window_view_screen.dart';
 
 /// A tracked map pointer: position + landing time for pinch pairing.
 class _TouchDown {
@@ -190,7 +195,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     ref.listenManual<GameState>(gameStateProvider, (prev, next) {
       if (prev?.time.minutes != next.time.minutes ||
           prev?.time.day != next.time.day) {
-        Future.microtask(_refreshNpcMarkers);
+        Future.microtask(() {
+          _refreshNpcMarkers();
+          // Keep the room/town tint in step with activities that advance
+          // the clock (TV, cooking, eating, travel).
+          _game?.setDayPeriod(next.time.period);
+        });
       }
     });
     _boot();
@@ -210,6 +220,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           inventory: [],
         );
       }
+      // Saves from before the kitchen existed get a one-time starter pantry.
+      gs.ensureStarterPantry();
       _game = LifeGame(
         onNearestChanged: (n) => _syncState(() => _nearest = n),
         // Walking through a door swaps the Flame world for the interior
@@ -240,6 +252,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       if (!mounted) return;
       if (game != null && game.isReady) {
         _refreshNpcMarkers();
+        game.setDayPeriod(ref.read(gameStateProvider).time.period);
         // Trigger a rebuild in case the first frame rendered
         // while the game was still loading.
         if (mounted) setState(() {});
@@ -518,6 +531,98 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     });
   }
 
+  /// Shared full-screen scene transition, matching the wardrobe/sofa
+  /// presentation for the TV, kitchen, table, and window scenes.
+  Future<T?> _showScene<T>({
+    required Widget scene,
+    required String barrierLabel,
+    Color barrierColor = const Color(0xDE000000),
+  }) {
+    AudioService().interact();
+    return showGeneralDialog<T>(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: barrierLabel,
+      barrierColor: barrierColor,
+      transitionDuration: const Duration(milliseconds: 380),
+      pageBuilder: (_, animation, secondaryAnimation) => scene,
+      transitionBuilder: (_, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.97, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  void _openTv() {
+    _showScene<TvResult>(
+      scene: const TvScreen(),
+      barrierLabel: 'Watch television',
+    ).then((result) {
+      if (!mounted || result == null || !result.watched) return;
+      final title = result.lastChannel?.title ?? 'television';
+      _flashMessage(
+        'You turn off $title. Energy -${result.energySpent}, '
+        '+${result.minutes} min across ${result.sessions} '
+        '${result.sessions == 1 ? 'visit' : 'visits'}.',
+        seconds: 5,
+      );
+    });
+  }
+
+  Future<void> _openCooking() async {
+    final result = await _showScene<CookingResult>(
+      scene: const CookingScreen(),
+      barrierLabel: 'Cook in the kitchen',
+    );
+    if (!mounted || result == null) return;
+    if (result.openHomeMenu) {
+      _syncState(() => _locationSheet = 'home');
+      return;
+    }
+    if (result.lastCooked != null) {
+      _flashMessage(
+        '${result.lastCooked} is plated and waiting on the dining table.',
+        seconds: 4,
+      );
+    }
+    if (result.openTable) {
+      unawaited(_openDiningTable());
+    }
+  }
+
+  Future<void> _openDiningTable() async {
+    final result = await _showScene<DiningResult>(
+      scene: const DiningTableScreen(),
+      barrierLabel: 'Look at the dining table',
+    );
+    if (!mounted || result == null) return;
+    if (result.ateTitle != null) {
+      _flashMessage(
+        'You ate ${result.ateTitle}. Energy +${result.energyGained}.',
+        seconds: 4,
+      );
+    }
+    if (result.openKitchen) {
+      unawaited(_openCooking());
+    }
+  }
+
+  void _openWindowView() {
+    _showScene<void>(
+      scene: const WindowViewScreen(),
+      barrierLabel: 'Look out the window',
+    );
+  }
+
   /// Bed interaction: confirm, fade to black, sleep to next morning 07:00
   /// with full energy, then fade back revealing the new day.
   Future<void> _sleepInBed() async {
@@ -570,6 +675,38 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   void _sitOrInteract() {
     final target = _nearest;
     if (target == null) return;
+    // Living-room television: channel picker with real activity costs.
+    if (target is Television) {
+      final tv = target as Television;
+      if (tv.opensTvScene) {
+        _openTv();
+        return;
+      }
+    }
+    // Kitchen counter: cooking and pantry stock.
+    if (target is CookingStation) {
+      final kitchen = target as CookingStation;
+      if (kitchen.opensCookingScene) {
+        _openCooking();
+        return;
+      }
+    }
+    // Dining table: plated meals and eating.
+    if (target is DiningTable) {
+      final table = target as DiningTable;
+      if (table.opensDiningScene) {
+        _openDiningTable();
+        return;
+      }
+    }
+    // Interactive home window: period-aware neighbourhood view.
+    if (target is WindowView) {
+      final window = target as WindowView;
+      if (window.opensWindowView) {
+        _openWindowView();
+        return;
+      }
+    }
     // The home closet opens the dress-up room.
     if (target is Wardrobe) {
       final wardrobe = target as Wardrobe;
@@ -647,6 +784,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final gs = ref.read(gameStateProvider);
     gs.registerBuildingEntry();
     _refreshNpcMarkers();
+    _game?.setDayPeriod(gs.time.period);
     _syncState(() => _locationSheet = null);
     _flashMessage(
       'Entered $id (+1h30m) — Day ${gs.time.day} ${gs.time.clockLabel} ${gs.time.periodLabel}',
@@ -694,15 +832,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 onPointerUp: _pinchUp,
                 onPointerCancel: _pinchUp,
                 child: GameWidget(
-                game: _game!,
-                loadingBuilder: (_) => Container(
-                  color: const Color(0xFFEFE8D5),
-                  child: const Center(child: CircularProgressIndicator()),
-                ),
-                errorBuilder: (_, ex) => Container(
-                  color: const Color(0xFFEFE8D5),
-                  child: Center(child: Text('Game failed to load: $ex')),
-                ),
+                  game: _game!,
+                  loadingBuilder: (_) => Container(
+                    color: const Color(0xFFEFE8D5),
+                    child: const Center(child: CircularProgressIndicator()),
+                  ),
+                  errorBuilder: (_, ex) => Container(
+                    color: const Color(0xFFEFE8D5),
+                    child: Center(child: Text('Game failed to load: $ex')),
+                  ),
                 ),
               ),
             )
@@ -1108,10 +1246,7 @@ class _SleepNightCard extends StatelessWidget {
           if (showWakePill) ...[
             const SizedBox(height: 14),
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 8,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.white.withAlpha(20),
                 borderRadius: BorderRadius.circular(999),
@@ -1464,8 +1599,7 @@ class _LocationPanel extends ConsumerWidget {
             enabled: gs.canDoActivity('socialize'),
           ),
           btn('Sleep → morning 07:00 (saves)', () async {
-            final ok =
-                await showSleepConfirmDialog(context);
+            final ok = await showSleepConfirmDialog(context);
             if (!ok) return;
             onClose();
             if (onSleep != null) {
@@ -1643,7 +1777,8 @@ class _LocationPanel extends ConsumerWidget {
           Text(
             'Shift: 17:00–20:30 · Salary ₱300 (Energy -25)',
             style: const TextStyle(fontSize: 12),
-          ),          if (gs.isExhausted)
+          ),
+          if (gs.isExhausted)
             const Text(
               'Too tired for shift! Rest first.',
               style: TextStyle(fontSize: 11, color: Colors.red),
@@ -1694,19 +1829,15 @@ class _LocationPanel extends ConsumerWidget {
               onMessage('Not enough money.');
             }
           }),
-          btn(
-            'Browse shops (+Charm 1, 30m)',
-            () {
-              if (!gs.canDoActivity('socialize')) {
-                onMessage('Too tired.');
-                return;
-              }
-              gs.applyActivity('rest');
-              gs.addCharm(1);
-              onMessage('Window shopping. Charm +1.');
-            },
-            enabled: gs.canDoActivity('socialize'),
-          ),
+          btn('Browse shops (+Charm 1, 30m)', () {
+            if (!gs.canDoActivity('socialize')) {
+              onMessage('Too tired.');
+              return;
+            }
+            gs.applyActivity('rest');
+            gs.addCharm(1);
+            onMessage('Window shopping. Charm +1.');
+          }, enabled: gs.canDoActivity('socialize')),
           btn('Food court meal ₱50 (+10 energy)', () {
             final r = gs.removeMoney(50);
             if (!r.ok) {
@@ -1740,19 +1871,15 @@ class _LocationPanel extends ConsumerWidget {
         ];
       case 'bookstore':
         return [
-          btn(
-            'Read manga (+Int 1, 30m)',
-            () {
-              if (!gs.canDoActivity('study')) {
-                onMessage('Too tired.');
-                return;
-              }
-              gs.applyActivity('study');
-              gs.addIntelligence(1);
-              onMessage('A whole volume in one sitting. Intelligence +1.');
-            },
-            enabled: gs.canDoActivity('study'),
-          ),
+          btn('Read manga (+Int 1, 30m)', () {
+            if (!gs.canDoActivity('study')) {
+              onMessage('Too tired.');
+              return;
+            }
+            gs.applyActivity('study');
+            gs.addIntelligence(1);
+            onMessage('A whole volume in one sitting. Intelligence +1.');
+          }, enabled: gs.canDoActivity('study')),
           btn('Buy notebook ₱20', () {
             final r = gs.removeMoney(20);
             if (r.ok) {
@@ -1772,6 +1899,20 @@ class _LocationPanel extends ConsumerWidget {
             } else {
               onMessage('Not enough money.');
             }
+          }),
+          btn('Stock the pantry ₱120', () {
+            final r = gs.removeMoney(120);
+            if (!r.ok) {
+              onMessage('Not enough money.');
+              return;
+            }
+            PantryCatalog.groceryBundle.forEach(
+              (itemId, count) => gs.addItem(itemId, count),
+            );
+            onMessage(
+              'Pantry restocked: eggs, milk, rice, chicken, vegetables, '
+              'noodles, tomato, cheese, and bread.',
+            );
           }),
           btn('Browse aisles', () {
             gs.applyActivity('walk');
@@ -1889,13 +2030,10 @@ class _LocationPanel extends ConsumerWidget {
         ];
       case 'beach':
         return [
-          btn(
-            'Swim (+Str 1, 60m)',
-            () {
-              gs.applyActivity('exercise');
-              onMessage('Against the waves. Strength +1.');
-            },
-          ),
+          btn('Swim (+Str 1, 60m)', () {
+            gs.applyActivity('exercise');
+            onMessage('Against the waves. Strength +1.');
+          }),
           btn('Sunbathe (+Energy, 30m)', () => gs.applyActivity('rest')),
         ];
       case 'fishing':
@@ -2095,20 +2233,20 @@ class _PhoneSheet extends ConsumerWidget {
                         ),
                       ],
                     ),
-            ),
-          ),
-          ),
-          Center(
-            child: Container(
-              width: 110,
-              height: 5,
-              margin: const EdgeInsets.only(top: 8, bottom: 4),
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(140),
-                borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
               ),
-            ),
-          ),
+              Center(
+                child: Container(
+                  width: 110,
+                  height: 5,
+                  margin: const EdgeInsets.only(top: 8, bottom: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(140),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -2159,9 +2297,7 @@ class _PhoneSheet extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         backgroundColor: const Color(0xFFFBF7EC),
         // Cream background in both modes: pin dark text so this never
         // becomes white-on-white under the system dark theme.

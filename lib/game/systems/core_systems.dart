@@ -93,6 +93,53 @@ class Activities {
       charmDelta: 2,
       happinessDelta: 1,
     ),
+    // Living-room TV. Every channel is a separate visit: picking one spends
+    // energy and advances the clock immediately, so the cost is explicit
+    // even if the player turns the TV off a moment later.
+    'tv_movie': ActivityConfig(
+      id: 'tv_movie',
+      minutes: 120,
+      energyDelta: -8,
+      happinessDelta: 3,
+    ),
+    'tv_internet': ActivityConfig(
+      id: 'tv_internet',
+      minutes: 60,
+      energyDelta: -4,
+      intelligenceDelta: 1,
+    ),
+    'tv_news': ActivityConfig(
+      id: 'tv_news',
+      minutes: 45,
+      energyDelta: -3,
+      intelligenceDelta: 1,
+    ),
+    'tv_cartoon': ActivityConfig(
+      id: 'tv_cartoon',
+      minutes: 90,
+      energyDelta: -6,
+      happinessDelta: 2,
+    ),
+    // Home cooking. Small energy cost for standing at the stove; the meal
+    // itself restores much more when eaten at the dining table.
+    'cook_breakfast': ActivityConfig(
+      id: 'cook_breakfast',
+      minutes: 45,
+      energyDelta: -4,
+      happinessDelta: 1,
+    ),
+    'cook_lunch': ActivityConfig(
+      id: 'cook_lunch',
+      minutes: 60,
+      energyDelta: -5,
+      happinessDelta: 1,
+    ),
+    'cook_dinner': ActivityConfig(
+      id: 'cook_dinner',
+      minutes: 60,
+      energyDelta: -5,
+      happinessDelta: 1,
+    ),
   };
 
   static ActivityConfig of(String id) => configs[id] ?? configs['walk']!;

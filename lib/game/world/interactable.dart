@@ -39,6 +39,30 @@ abstract interface class Wardrobe {
   bool get opensWardrobe;
 }
 
+/// Opt-in marker for the living-room television. The full-screen scene
+/// offers movies, the internet, the news and cartoons; every selection is
+/// an activity that spends energy and advances the clock.
+abstract interface class Television {
+  bool get opensTvScene;
+}
+
+/// Opt-in marker for the kitchen counter: opens the cooking/pantry scene.
+abstract interface class CookingStation {
+  bool get opensCookingScene;
+}
+
+/// Opt-in marker for the dining table: shows cooked meals and lets the
+/// player sit down and eat one.
+abstract interface class DiningTable {
+  bool get opensDiningScene;
+}
+
+/// Opt-in marker for windows that can be looked through. The window view
+/// repaints the neighbourhood for the current DayPeriod.
+abstract interface class WindowView {
+  bool get opensWindowView;
+}
+
 class LifeInteractContext {
   final void Function(String message) showMessage;
 

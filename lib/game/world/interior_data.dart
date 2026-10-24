@@ -38,6 +38,15 @@ class InteriorProp {
   /// closet.
   final bool wardrobe;
 
+  /// When true, interacting opens the full-screen TV scene.
+  final bool tvScene;
+
+  /// When true, interacting opens the cooking/pantry scene.
+  final bool cookScene;
+
+  /// When true, interacting opens the dining-table scene.
+  final bool diningScene;
+
   /// Optional sprite art for the prop (asset file under assets/images/,
   /// e.g. 'home_bed.png'). Loaded in the background by [InteriorWorld];
   /// the flat color rect is the fallback until it arrives. When art is
@@ -63,13 +72,17 @@ class InteriorProp {
     this.sleep = false,
     this.relaxScene = false,
     this.wardrobe = false,
+    this.tvScene = false,
+    this.cookScene = false,
+    this.diningScene = false,
     this.art,
     this.artTurns = 0,
   });
 }
 
-/// A glazed window set into the room's back wall. Purely decorative:
-/// windows never collide or trigger, they just let daylight into the room.
+/// A glazed window set into the room's back wall. Decorative unless
+/// [interactive] is true, in which case walking up to it opens the
+/// full-screen neighbourhood view. Windows never collide.
 class InteriorWindow {
   /// Left edge, in room units along the back wall.
   final double x;
@@ -84,12 +97,18 @@ class InteriorWindow {
   /// Side drapes hanging beside the glass.
   final bool curtains;
 
+  /// True when the player can look through this window. Only the wide
+  /// centre window is interactive: the side windows sit above furniture
+  /// and would steal the interaction from the closet and kitchen.
+  final bool interactive;
+
   const InteriorWindow({
     required this.x,
     this.width = 250,
     this.height = 112,
     this.y = 20,
     this.curtains = true,
+    this.interactive = false,
   });
 }
 
@@ -152,7 +171,13 @@ InteriorLayout buildInterior(String locationId) {
         // a wide centre picture window flanked by two narrower ones.
         windows: [
           InteriorWindow(x: 330, width: 230, curtains: true),
-          InteriorWindow(x: 650, width: 300, height: 120, y: 14),
+          InteriorWindow(
+            x: 650,
+            width: 300,
+            height: 120,
+            y: 14,
+            interactive: true,
+          ),
           InteriorWindow(x: 1040, width: 230, curtains: true),
         ],
         // Realistic setup: bedroom row on top (bed by the left wall,
@@ -193,7 +218,11 @@ InteriorLayout buildInterior(String locationId) {
             color: 0xFFB7B7B7,
             label: 'KITCHEN',
             interactLabel: 'Open Home menu',
+            // Kept as the room's activity point (the generic engine menu
+            // fallback), while GameScreen routes the action button to the
+            // full cooking scene first.
             opensMenu: true,
+            cookScene: true,
             art: 'home_kitchen.png',
           ),
           InteriorProp(
@@ -220,6 +249,7 @@ InteriorLayout buildInterior(String locationId) {
             label: 'TV',
             interactLabel: 'Turn on the TV',
             message: 'Static. The antenna needs fixing.',
+            tvScene: true,
             art: 'home_tv.png',
           ),
           InteriorProp(
@@ -231,6 +261,7 @@ InteriorLayout buildInterior(String locationId) {
             label: 'TABLE',
             interactLabel: 'Look at the table',
             message: 'Dinner is served at seven.',
+            diningScene: true,
             art: 'home_table.png',
             // Landscape art turned portrait: rect matches the rotated
             // footprint (dining nook under the kitchen, clear of the TV
@@ -591,7 +622,8 @@ InteriorLayout buildInterior(String locationId) {
         floorColor: 0xFFE8E4DA,
         wallColor: 0xFFB7C9E2,
         trimColor: 0xFF5B7FA6,
-        entryMessage: 'Cool air and polished marble. A queue rope snakes ahead.',
+        entryMessage:
+            'Cool air and polished marble. A queue rope snakes ahead.',
         exitMessage: 'You step back outside.',
         props: [
           InteriorProp(

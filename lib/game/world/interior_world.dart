@@ -13,6 +13,7 @@ class InteriorWorld extends LifeWorld {
   final void Function(Interactable?) onNearestChanged;
 
   final List<PositionComponent> _solids = [];
+  final List<Interactable> _interactables = [];
   ExitDoor? _exitDoor;
 
   /// Player feet position fed in by LifeGame each frame (like the town's
@@ -39,7 +40,7 @@ class InteriorWorld extends LifeWorld {
   List<PositionComponent> solidBounds() => _solids;
 
   @override
-  List<Interactable> interactables() => [?_exitDoor];
+  List<Interactable> interactables() => [?_exitDoor, ..._interactables];
 
   @override
   Future<void> onLoad() async {
@@ -95,8 +96,22 @@ class InteriorWorld extends LifeWorld {
     );
 
     // Glazed windows sit on the back wall, above every piece of furniture.
+    // The one marked interactive is also a non-solid interaction target;
+    // a small gold trigger marker shows where to stand.
     for (final window in layout.windows) {
-      add(InteriorWindowBlock(spec: window, layout: layout));
+      final block = InteriorWindowBlock(spec: window, layout: layout);
+      add(block);
+      if (window.interactive) {
+        _interactables.add(block);
+        add(
+          TriggerMarker(
+            at: Vector2(
+              window.x + window.width / 2,
+              window.y + window.height + 18,
+            ),
+          ),
+        );
+      }
     }
 
     for (final prop in layout.props) {
@@ -105,11 +120,7 @@ class InteriorWorld extends LifeWorld {
       _addSolid(block);
       // Animated trigger point floating over the furniture, so the
       // interaction spot is visible without hunting for it.
-      add(
-        TriggerMarker(
-          at: Vector2(prop.x + prop.w / 2, prop.y - 30),
-        ),
-      );
+      add(TriggerMarker(at: Vector2(prop.x + prop.w / 2, prop.y - 30)));
     }
 
     _exitDoor = ExitDoor(layout: layout, at: doorPosition);
@@ -214,9 +225,10 @@ class ExitDoor extends PositionComponent implements Interactable {
 /// Hand-drawn with the room's trim colour for the casing and mullions.
 /// The glass is a sky-blue gradient with soft clouds, a hedge line, and
 /// slanted reflection bands so it reads as real glazing rather than a
-/// flat blue rectangle. Sheer drapes hang at the sides. Purely visual:
-/// no collision, no interaction.
-class InteriorWindowBlock extends PositionComponent {
+/// flat blue rectangle. Sheer drapes hang at the sides. Interactive windows
+/// are non-solid targets handled by GameScreen; the rest are purely visual.
+class InteriorWindowBlock extends PositionComponent
+    implements Interactable, WindowView {
   final InteriorWindow spec;
   final InteriorLayout layout;
 
@@ -227,6 +239,37 @@ class InteriorWindowBlock extends PositionComponent {
         // Above the wall paint, below furniture (priority 50/101).
         priority: 1,
       );
+
+  @override
+  bool get opensWindowView => spec.interactive;
+
+  @override
+  bool get isSeat => false;
+
+  @override
+  String get interactId =>
+      'window_${layout.id}_${spec.x.toInt()}_${spec.y.toInt()}';
+
+  @override
+  String get interactLabel => 'Look out the window';
+
+  @override
+  Vector2 get interactPosition =>
+      Vector2(position.x + size.x / 2, position.y + size.y + 26);
+
+  /// Extends the glass down to floor level so the player only has to stand
+  /// beneath the window rather than touching the wall itself.
+  @override
+  Rect get touchRect =>
+      Rect.fromLTWH(position.x - 10, position.y - 8, size.x + 20, size.y + 166);
+
+  @override
+  Future<void> onInteract(LifeInteractContext ctx) async {
+    // The full-screen scene is dispatched by GameScreen's WindowView
+    // marker. This fallback only runs if a caller invokes the world
+    // directly (e.g. an engine-level test).
+    ctx.showMessage('You lean closer to the glass and take in the street.');
+  }
 
   static Color _shade(Color c, double amount) => amount >= 0
       ? Color.lerp(c, Colors.black, amount)!
@@ -266,10 +309,7 @@ class InteriorWindowBlock extends PositionComponent {
     );
 
     final glassRect = Rect.fromLTWH(12, 12, w - 24, h - 24);
-    final glass = RRect.fromRectAndRadius(
-      glassRect,
-      const Radius.circular(4),
-    );
+    final glass = RRect.fromRectAndRadius(glassRect, const Radius.circular(4));
 
     // Sky gradient behind the glass.
     canvas.drawRRect(
@@ -312,9 +352,15 @@ class InteriorWindowBlock extends PositionComponent {
       glassRect.width,
       6,
     );
-    canvas.drawRect(vBar.shift(const Offset(1.5, 1.5)), Paint()..color = const Color(0x33000000));
+    canvas.drawRect(
+      vBar.shift(const Offset(1.5, 1.5)),
+      Paint()..color = const Color(0x33000000),
+    );
     canvas.drawRect(vBar, bar);
-    canvas.drawRect(hBar.shift(const Offset(1.5, 1.5)), Paint()..color = const Color(0x33000000));
+    canvas.drawRect(
+      hBar.shift(const Offset(1.5, 1.5)),
+      Paint()..color = const Color(0x33000000),
+    );
     canvas.drawRect(hBar, bar);
     canvas.drawLine(
       vBar.topLeft + const Offset(2, 0),
@@ -327,10 +373,7 @@ class InteriorWindowBlock extends PositionComponent {
       barHi,
     );
     // Drawn stroke on the inside of the casing to seat the glass.
-    canvas.drawRRect(
-      glass.inflate(0.5),
-      barShadow,
-    );
+    canvas.drawRRect(glass.inflate(0.5), barShadow);
 
     // Brass latch where the glazing bars cross.
     canvas.drawCircle(
@@ -380,11 +423,7 @@ class InteriorWindowBlock extends PositionComponent {
     final cloud = Paint()..color = Colors.white.withAlpha(200);
     void cloudAt(double cx, double cy, double s) {
       canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(cx, cy),
-          width: 52 * s,
-          height: 16 * s,
-        ),
+        Rect.fromCenter(center: Offset(cx, cy), width: 52 * s, height: 16 * s),
         cloud,
       );
       canvas.drawOval(
@@ -462,11 +501,7 @@ class InteriorWindowBlock extends PositionComponent {
       ..color = rodColor
       ..strokeWidth = 4
       ..strokeCap = StrokeCap.round;
-    canvas.drawLine(
-      const Offset(-20, rodY),
-      Offset(w + 20, rodY),
-      rodPaint,
-    );
+    canvas.drawLine(const Offset(-20, rodY), Offset(w + 20, rodY), rodPaint);
     final finial = Paint()..color = rodColor;
     canvas.drawCircle(const Offset(-20, rodY), 5, finial);
     canvas.drawCircle(Offset(w + 20, rodY), 5, finial);
@@ -519,7 +554,13 @@ class InteriorWindowBlock extends PositionComponent {
 /// Chairs, benches, pews and sofas are sittable: they call `sitDown` so the
 /// player rests and recovers energy.
 class InteriorPropBlock extends RectangleComponent
-    implements Interactable, RelaxationSeat, Wardrobe {
+    implements
+        Interactable,
+        RelaxationSeat,
+        Wardrobe,
+        Television,
+        CookingStation,
+        DiningTable {
   final InteriorProp prop;
   final String locationId;
 
@@ -557,6 +598,15 @@ class InteriorPropBlock extends RectangleComponent
 
   @override
   bool get opensWardrobe => prop.wardrobe;
+
+  @override
+  bool get opensTvScene => prop.tvScene;
+
+  @override
+  bool get opensCookingScene => prop.cookScene;
+
+  @override
+  bool get opensDiningScene => prop.diningScene;
 
   @override
   String get interactId =>
@@ -696,11 +746,7 @@ class TriggerMarker extends PositionComponent {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3,
     );
-    canvas.drawCircle(
-      center,
-      4,
-      Paint()..color = Colors.white.withAlpha(220),
-    );
+    canvas.drawCircle(center, 4, Paint()..color = Colors.white.withAlpha(220));
     canvas.restore();
   }
 }
@@ -724,21 +770,20 @@ void drawCenteredLabel(
   final key = '$text|$fontSize|${color.toARGB32()}|$shadow';
   var painter = _labelCache[key];
   if (painter == null) {
-    painter =
-        TextPainter(
-          text: TextSpan(
-            text: text,
-            style: TextStyle(
-              color: color,
-              fontSize: fontSize,
-              fontWeight: FontWeight.bold,
-              shadows: shadow
-                  ? const [Shadow(color: Colors.black54, blurRadius: 3)]
-                  : null,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        )..layout();
+    painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: color,
+          fontSize: fontSize,
+          fontWeight: FontWeight.bold,
+          shadows: shadow
+              ? const [Shadow(color: Colors.black54, blurRadius: 3)]
+              : null,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
     _labelCache[key] = painter;
   }
   painter.paint(

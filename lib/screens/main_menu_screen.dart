@@ -35,16 +35,16 @@ class _MainMenuState extends ConsumerState<MainMenuScreen> {
 
   Future<void> _newGame() async {
     await GameDataService().loadAll();
-    ref
-        .read(gameStateProvider)
-        .loadSnapshot(
-          player: const PlayerModel(),
-          time: GameTime.morning(1),
-          npcs: Map.of(GameDataService().npcs),
-          quests: Map.of(GameDataService().quests),
-          flags: {},
-          inventory: [const InventoryStack('bread', 1)],
-        );
+    final gs = ref.read(gameStateProvider);
+    gs.loadSnapshot(
+      player: const PlayerModel(),
+      time: GameTime.morning(1),
+      npcs: Map.of(GameDataService().npcs),
+      quests: Map.of(GameDataService().quests),
+      flags: {},
+      inventory: [const InventoryStack('bread', 1)],
+    );
+    gs.ensureStarterPantry();
     if (mounted) Navigator.of(context).pushReplacementNamed('/game');
   }
 
@@ -135,93 +135,93 @@ class _MainMenuState extends ConsumerState<MainMenuScreen> {
         ),
         child: SafeArea(
           child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 22,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 22,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(110),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: const Column(
+                        children: [
+                          Text(
+                            'LIFE TRAIL',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 42,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 3,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 6),
+                          Text(
+                            'An original small-town life simulator',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(110),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white24),
+                    const SizedBox(height: 24),
+                    _MenuButton(
+                      icon: Icons.play_arrow_rounded,
+                      label: 'New Game',
+                      subtitle: 'Start a fresh life in town',
+                      primary: true,
+                      onPressed: _newGame,
                     ),
-                    child: const Column(
+                    const SizedBox(height: 10),
+                    _MenuButton(
+                      icon: Icons.play_circle_outline,
+                      label: 'Continue',
+                      subtitle: 'Pick up where you left off',
+                      enabled: _hasSave,
+                      onPressed: _hasSave ? _continue : null,
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
                       children: [
-                        Text(
-                          'LIFE TRAIL',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 42,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 3,
-                            color: Colors.white,
+                        Expanded(
+                          child: _MenuButton(
+                            icon: Icons.save_outlined,
+                            label: 'Slots',
+                            compact: true,
+                            onPressed: () =>
+                                Navigator.of(context).pushNamed('/save-load'),
                           ),
                         ),
-                        SizedBox(height: 6),
-                        Text(
-                          'An original small-town life simulator',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 14,
-                            fontStyle: FontStyle.italic,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _MenuButton(
+                            icon: Icons.settings_outlined,
+                            label: 'Settings',
+                            compact: true,
+                            onPressed: () =>
+                                Navigator.of(context).pushNamed('/settings'),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  _MenuButton(
-                    icon: Icons.play_arrow_rounded,
-                    label: 'New Game',
-                    subtitle: 'Start a fresh life in town',
-                    primary: true,
-                    onPressed: _newGame,
-                  ),
-                  const SizedBox(height: 10),
-                  _MenuButton(
-                    icon: Icons.play_circle_outline,
-                    label: 'Continue',
-                    subtitle: 'Pick up where you left off',
-                    enabled: _hasSave,
-                    onPressed: _hasSave ? _continue : null,
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _MenuButton(
-                          icon: Icons.save_outlined,
-                          label: 'Slots',
-                          compact: true,
-                          onPressed: () =>
-                              Navigator.of(context).pushNamed('/save-load'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _MenuButton(
-                          icon: Icons.settings_outlined,
-                          label: 'Settings',
-                          compact: true,
-                          onPressed: () =>
-                              Navigator.of(context).pushNamed('/settings'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
           ),
         ),
       ),
@@ -305,10 +305,7 @@ class _MenuButton extends StatelessWidget {
                     ],
                   ),
                 ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: fg.withAlpha(150),
-                ),
+                Icon(Icons.chevron_right_rounded, color: fg.withAlpha(150)),
               ],
             ),
           ),

@@ -1,0 +1,275 @@
+import 'dart:math';
+
+import 'package:flame/game.dart';
+import 'package:flutter/material.dart' hide DayPeriod;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:lifetrail/game/life_game.dart';
+import 'package:lifetrail/game/state/game_state.dart';
+import 'package:lifetrail/game/systems/core_systems.dart';
+import 'package:lifetrail/game/world/interactable.dart';
+import 'package:lifetrail/game/world/interior_data.dart';
+import 'package:lifetrail/models/cooking.dart';
+import 'package:lifetrail/models/game_time.dart';
+import 'package:lifetrail/models/tv_show.dart';
+import 'package:lifetrail/screens/cooking_screen.dart';
+import 'package:lifetrail/screens/dining_table_screen.dart';
+import 'package:lifetrail/screens/tv_screen.dart';
+import 'package:lifetrail/screens/window_view_screen.dart';
+
+Widget _scene(GameState state, Widget child) {
+  return ProviderScope(
+    overrides: [gameStateProvider.overrideWith((ref) => state)],
+    child: MaterialApp(home: child),
+  );
+}
+
+Future<void> _setPhoneLandscape(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(1000, 600);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('Home scene markers', () {
+    testWidgets('the TV, kitchen, table and window trigger from inside', (
+      tester,
+    ) async {
+      Interactable? nearest;
+      final game = LifeGame(
+        onNearestChanged: (n) => nearest = n,
+        onEnterLocation: (_) {},
+        onOpenLocationMenu: (_) {},
+        onLeftLocation: (_) {},
+        onTalkTo: (_) {},
+        onMessage: (_) {},
+        random: Random(11),
+      );
+      await tester.pumpWidget(GameWidget(game: game));
+      for (var i = 0; i < 30 && !game.isReady; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await game.enterLocation('home');
+      await tester.pump(const Duration(milliseconds: 16));
+
+      void stand(double x, double y) {
+        game.player!.position.setValues(x, y);
+        game.player!.previousPosition.setValues(x, y);
+        game.update(1 / 60);
+        game.update(1 / 60);
+      }
+
+      // Free floor beneath the centre window, above the TV cabinet.
+      stand(800, 190);
+      expect(nearest?.interactLabel, 'Look out the window');
+      expect((nearest! as WindowView).opensWindowView, isTrue);
+
+      // South-east of the TV set, clear of the front door.
+      stand(950, 880);
+      expect(nearest?.interactLabel, 'Turn on the TV');
+      expect((nearest! as Television).opensTvScene, isTrue);
+
+      // South of the dining table.
+      stand(1480, 940);
+      expect(nearest?.interactLabel, 'Look at the table');
+      expect((nearest! as DiningTable).opensDiningScene, isTrue);
+
+      // West of the kitchen counter.
+      stand(1040, 370);
+      expect(nearest?.interactLabel, 'Open Home menu');
+      expect((nearest! as CookingStation).opensCookingScene, isTrue);
+    });
+
+    test('TV, kitchen, table and centre window opt into their scenes', () {
+      final home = buildInterior('home');
+      final tv = home.props.firstWhere((prop) => prop.label == 'TV');
+      final kitchen = home.props.firstWhere((prop) => prop.label == 'KITCHEN');
+      final table = home.props.firstWhere((prop) => prop.label == 'TABLE');
+      expect(tv.tvScene, isTrue);
+      expect(kitchen.cookScene, isTrue);
+      expect(table.diningScene, isTrue);
+      expect(home.props.where((prop) => prop.tvScene), hasLength(1));
+      expect(home.props.where((prop) => prop.cookScene), hasLength(1));
+      expect(home.props.where((prop) => prop.diningScene), hasLength(1));
+      expect(home.windows.where((window) => window.interactive), hasLength(1));
+    });
+  });
+
+  group('Television', () {
+    test('ships four channels, all backed by energy-costing activities', () {
+      final state = GameState();
+      expect(TvCatalog.channels, hasLength(4));
+      for (final channel in TvCatalog.channels) {
+        final cfg = Activities.of(channel.activityId);
+        expect(cfg.energyDelta, lessThan(0));
+        expect(cfg.minutes, greaterThan(0));
+      }
+
+      state.applyActivity('tv_movie');
+      expect(state.player.energy, 72);
+      expect(state.time.minutes, 7 * 60 + 120);
+    });
+
+    testWidgets('selecting a channel spends energy and starts the program', (
+      tester,
+    ) async {
+      await _setPhoneLandscape(tester);
+      final state = GameState();
+      await tester.pumpWidget(_scene(state, const TvScreen()));
+      await tester.pump();
+
+      expect(find.text('Movie Night'), findsOneWidget);
+      expect(find.text('Browse the Internet'), findsOneWidget);
+      expect(find.text('Watch the News'), findsOneWidget);
+
+      await tester.tap(find.text('Movie Night'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(state.player.energy, 72);
+      expect(state.time.minutes, 7 * 60 + 120);
+      expect(find.text('Neon Harbor'), findsWidgets);
+      expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
+    });
+  });
+
+  group('Cooking and pantry', () {
+    test('starter pantry seeds once and cooking consumes the right stock', () {
+      final state = GameState();
+      state.ensureStarterPantry();
+      expect(state.itemCount('bread'), PantryCatalog.starterStock['bread']);
+      expect(state.hasFlag('pantry_seeded'), isTrue);
+      final seededBread = state.itemCount('bread');
+
+      state.ensureStarterPantry();
+      expect(state.itemCount('bread'), seededBread);
+
+      final breakfast = CookingCatalog.breakfast;
+      final canCook = state.cookMeal(breakfast);
+      expect(canCook, isTrue);
+      expect(state.itemCount('bread'), seededBread - 1);
+      expect(state.itemCount('egg'), 2);
+      expect(state.itemCount('meal_breakfast'), 1);
+      expect(state.player.energy, 76);
+      expect(state.time.minutes, 7 * 60 + 45);
+
+      expect(state.eatCookedMeal('meal_breakfast'), isTrue);
+      expect(state.itemCount('meal_breakfast'), 0);
+      expect(state.player.energy, 94);
+      expect(state.time.minutes, 7 * 60 + 75);
+    });
+
+    test('cooking is atomic when an ingredient is missing', () {
+      final state = GameState();
+      state.ensureStarterPantry();
+      state.removeItem('egg', 4);
+      final bread = state.itemCount('bread');
+      expect(state.cookMeal(CookingCatalog.breakfast), isFalse);
+      expect(state.itemCount('bread'), bread);
+      expect(state.itemCount('meal_breakfast'), 0);
+    });
+
+    testWidgets('the kitchen cooks breakfast and plates it for the table', (
+      tester,
+    ) async {
+      await _setPhoneLandscape(tester);
+      final state = GameState();
+      state.ensureStarterPantry();
+      final bread = state.itemCount('bread');
+      await tester.pumpWidget(_scene(state, const CookingScreen()));
+      await tester.pump();
+
+      expect(find.text('PANTRY STOCK'), findsOneWidget);
+      expect(find.text('Sunrise Breakfast'), findsOneWidget);
+      expect(find.text('Midday Rice Bowl'), findsOneWidget);
+      expect(find.text('Sunset Noodle Pot'), findsOneWidget);
+
+      await tester.tap(find.text('Cook').first);
+      await tester.pump();
+      expect(state.itemCount('bread'), bread - 1);
+      expect(state.itemCount('meal_breakfast'), 1);
+      expect(state.player.energy, 76);
+
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+      expect(find.text('Set the table'), findsOneWidget);
+    });
+  });
+
+  group('Dining table', () {
+    testWidgets('a cooked meal can be eaten and restores energy', (
+      tester,
+    ) async {
+      await _setPhoneLandscape(tester);
+      final state = GameState();
+      state.player = state.player.copyWith(energy: 40);
+      state.addItem('meal_breakfast', 1);
+      await tester.pumpWidget(_scene(state, const DiningTableScreen()));
+      await tester.pump();
+
+      expect(find.text('Sunrise Breakfast'), findsOneWidget);
+      expect(find.text('ON THE TABLE'), findsOneWidget);
+
+      await tester.tap(find.text('Sunrise Breakfast'));
+      await tester.pump();
+      await tester.tap(find.textContaining('Sit down & eat'));
+      await tester.pump();
+
+      expect(state.itemCount('meal_breakfast'), 0);
+      expect(state.player.energy, 58);
+      expect(state.time.minutes, 7 * 60 + 30);
+
+      await tester.pump(const Duration(milliseconds: 1000));
+      await tester.pump();
+      expect(find.text('Nothing plated yet.'), findsOneWidget);
+    });
+
+    testWidgets('an empty table points the player back to the kitchen', (
+      tester,
+    ) async {
+      await _setPhoneLandscape(tester);
+      final state = GameState();
+      await tester.pumpWidget(_scene(state, const DiningTableScreen()));
+      await tester.pump();
+
+      expect(find.text('Nothing plated yet.'), findsOneWidget);
+      expect(find.text('Go to the kitchen'), findsOneWidget);
+    });
+  });
+
+  group('Window view', () {
+    testWidgets('the neighbourhood changes from morning to noon to night', (
+      tester,
+    ) async {
+      await _setPhoneLandscape(tester);
+      final state = GameState();
+      await tester.pumpWidget(_scene(state, const WindowViewScreen()));
+      await tester.pump();
+
+      expect(find.text('Morning light'), findsOneWidget);
+      expect(find.text('Maple Apartments'), findsOneWidget);
+      expect(find.text('Corner Bakery'), findsOneWidget);
+
+      state.advanceMinutes(6 * 60); // 13:00 — noon light.
+      await tester.pump();
+      expect(find.text('Noon light'), findsOneWidget);
+
+      state.advanceMinutes(5 * 60); // 18:00 — evening.
+      await tester.pump();
+      expect(find.text('Evening light'), findsOneWidget);
+
+      state.advanceMinutes(4 * 60); // 22:00 — night.
+      await tester.pump();
+      expect(find.text('Night light'), findsOneWidget);
+    });
+
+    test('the four periods map to the expected clock labels', () {
+      expect(GameTime(day: 1, minutes: 8 * 60).period, DayPeriod.morning);
+      expect(GameTime(day: 1, minutes: 13 * 60).period, DayPeriod.afternoon);
+      expect(GameTime(day: 1, minutes: 18 * 60).period, DayPeriod.evening);
+      expect(GameTime(day: 1, minutes: 22 * 60).period, DayPeriod.night);
+    });
+  });
+}

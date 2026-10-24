@@ -5,6 +5,7 @@ import '../../models/game_time.dart';
 import '../../models/npc_model.dart';
 import '../../models/quest_model.dart';
 import '../../models/item_model.dart';
+import '../../models/cooking.dart';
 import '../systems/core_systems.dart';
 import 'game_snapshot.dart';
 
@@ -333,6 +334,88 @@ class GameState extends ChangeNotifier {
     }
     notifyListeners();
     return true;
+  }
+
+  int itemCount(String itemId) {
+    for (final stack in inventory) {
+      if (stack.itemId == itemId) return stack.count;
+    }
+    return 0;
+  }
+
+  bool hasItems(Map<String, int> needs) {
+    for (final entry in needs.entries) {
+      if (itemCount(entry.key) < entry.value) return false;
+    }
+    return true;
+  }
+
+  /// Adds the starter pantry once per save. Called after loading so saves
+  /// created before the kitchen existed still get a usable first stock.
+  void ensureStarterPantry() {
+    if (hasFlag('pantry_seeded')) return;
+    _addStacksSilently(PantryCatalog.starterStock);
+    flags['pantry_seeded'] = 1;
+    notifyListeners();
+  }
+
+  /// Cooks [recipe] atomically: ingredients are checked before anything is
+  /// consumed, then the meal is added to the inventory and the cooking
+  /// activity advances time / spends energy.
+  bool cookMeal(CookingRecipe recipe) {
+    if (!canDoActivity(recipe.activityId)) return false;
+    if (!hasItems(recipe.ingredients)) return false;
+    _removeStacksSilently(recipe.ingredients);
+    _addStacksSilently({recipe.mealId: 1});
+    notifyListeners();
+    applyActivity(recipe.activityId);
+    return true;
+  }
+
+  /// Eats a plated meal at the dining table. Returns false if the meal is
+  /// not in the kitchen/table inventory.
+  bool eatCookedMeal(String mealId) {
+    final recipe = CookingCatalog.byMealId(mealId);
+    if (recipe == null) return false;
+    if (!removeItem(mealId, 1)) return false;
+    advanceMinutes(recipe.eatMinutes);
+    player = player.copyWith(
+      energy: player.energy + recipe.eatEnergy,
+      happiness: player.happiness + recipe.eatHappiness,
+    );
+    _checkQuestUnlocks();
+    notifyListeners();
+    return true;
+  }
+
+  List<CookingRecipe> get cookedMeals => CookingCatalog.recipes
+      .where((recipe) => itemCount(recipe.mealId) > 0)
+      .toList();
+
+  void _addStacksSilently(Map<String, int> stacks) {
+    stacks.forEach((itemId, count) {
+      final idx = inventory.indexWhere((e) => e.itemId == itemId);
+      if (idx >= 0) {
+        inventory[idx] = inventory[idx].copyWith(
+          count: inventory[idx].count + count,
+        );
+      } else {
+        inventory.add(InventoryStack(itemId, count));
+      }
+    });
+  }
+
+  void _removeStacksSilently(Map<String, int> stacks) {
+    stacks.forEach((itemId, count) {
+      final idx = inventory.indexWhere((e) => e.itemId == itemId);
+      if (idx < 0) return;
+      final left = inventory[idx].count - count;
+      if (left <= 0) {
+        inventory.removeAt(idx);
+      } else {
+        inventory[idx] = inventory[idx].copyWith(count: left);
+      }
+    });
   }
 
   void sleep() {

@@ -242,7 +242,9 @@ void main() {
       expect(game.player!.parent, same(homeRoom));
       expect(game.player!.isMounted, isTrue);
       for (final child in homeRoom.children) {
-        if (identical(child, game.player)) continue;
+        // Trigger markers are UI affordances intentionally drawn above the
+        // player; they are not room art or furniture and never collide.
+        if (identical(child, game.player) || child is TriggerMarker) continue;
         expect(
           game.player!.priority,
           greaterThan(child.priority),
@@ -625,10 +627,7 @@ void main() {
         final onTop = b.location.doorOnTop;
         expect(
           b.doorPosition.y,
-          closeTo(
-            onTop ? b.position.y : b.position.y + b.size.y,
-            0.001,
-          ),
+          closeTo(onTop ? b.position.y : b.position.y + b.size.y, 0.001),
         );
         expect(b.interactPosition, b.doorPosition);
         // Every lot keeps clear of all highway asphalt.
@@ -650,12 +649,7 @@ void main() {
     });
 
     test('outer interiors have furniture and a menu point', () {
-      for (final id in [
-        ...northRow,
-        ...westColumn,
-        ...southRow,
-        'police',
-      ]) {
+      for (final id in [...northRow, ...westColumn, ...southRow, 'police']) {
         final layout = buildInterior(id);
         expect(layout.id, id);
         expect(layout.props, isNotEmpty);
