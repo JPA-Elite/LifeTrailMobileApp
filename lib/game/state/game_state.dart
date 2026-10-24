@@ -133,6 +133,21 @@ class GameState extends ChangeNotifier {
     return next;
   }
 
+  /// Changes the player's visible outfit. Indexes are clamped to the
+  /// wardrobe catalog; nothing happens when the look is unchanged.
+  void setOutfit({int? shirtIndex, int? shortsIndex}) {
+    final next = player.copyWith(
+      shirtIndex: shirtIndex,
+      shortsIndex: shortsIndex,
+    );
+    if (next.shirtIndex == player.shirtIndex &&
+        next.shortsIndex == player.shortsIndex) {
+      return;
+    }
+    player = next;
+    notifyListeners();
+  }
+
   void addCharm(int delta) {
     player = player.copyWith(charm: player.charm + delta);
     _checkQuestUnlocks();

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
+import '../../models/outfit.dart';
 import '../world/feet_collision.dart';
 import 'stick_figure.dart';
 
@@ -34,6 +35,20 @@ class PlayerComponent extends PositionComponent {
 
   /// How much of the walk pose to apply: 0 = standing, 1 = full stride.
   double _stride = 0;
+
+  /// Indexes into [OutfitCatalog] for the current tee and shorts.
+  int _shirtIndex = 0;
+  int _shortsIndex = 0;
+
+  /// Applies the wardrobe choice. Cheap no-op when nothing changed, so
+  /// GameScreen can call this from every build.
+  void setOutfit(int shirtIndex, int shortsIndex) {
+    final nextShirt = OutfitCatalog.clampShirt(shirtIndex);
+    final nextShorts = OutfitCatalog.clampShorts(shortsIndex);
+    if (nextShirt == _shirtIndex && nextShorts == _shortsIndex) return;
+    _shirtIndex = nextShirt;
+    _shortsIndex = nextShorts;
+  }
 
   PlayerComponent({required Vector2 spawn})
     : super(
@@ -92,6 +107,8 @@ class PlayerComponent extends PositionComponent {
 
   @override
   void render(Canvas canvas) {
+    final tee = OutfitCatalog.shirtAt(_shirtIndex);
+    final bottoms = OutfitCatalog.shortsAt(_shortsIndex);
     drawStickFigure(
       canvas,
       width: size.x,
@@ -101,6 +118,12 @@ class PlayerComponent extends PositionComponent {
       facing: _facing,
       idle: _idle,
       running: running,
+      shirt: tee.primary,
+      shirtAccent: tee.accent,
+      shirtPattern: tee.pattern,
+      shorts: bottoms.primary,
+      shortsAccent: bottoms.accent,
+      shortsPattern: bottoms.pattern,
     );
   }
 }

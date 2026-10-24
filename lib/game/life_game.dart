@@ -350,6 +350,12 @@ class LifeGame extends FlameGame {
     player?.running = value;
   }
 
+  /// Pushes the wardrobe choice into the live player sprite. Called from
+  /// GameScreen whenever the player model changes.
+  void setPlayerOutfit(int shirtIndex, int shortsIndex) {
+    player?.setOutfit(shirtIndex, shortsIndex);
+  }
+
   Future<void> interactNearest() async {
     final target = _nearest;
     if (target != null) await target.onInteract(interactContext);

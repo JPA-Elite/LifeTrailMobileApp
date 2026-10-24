@@ -33,6 +33,11 @@ class InteriorProp {
   /// of the quick seat rest.
   final bool relaxScene;
 
+  /// When true, interacting opens the full-screen wardrobe scene where the
+  /// player can mix and match five tees and five shorts. Used by the home
+  /// closet.
+  final bool wardrobe;
+
   /// Optional sprite art for the prop (asset file under assets/images/,
   /// e.g. 'home_bed.png'). Loaded in the background by [InteriorWorld];
   /// the flat color rect is the fallback until it arrives. When art is
@@ -57,6 +62,7 @@ class InteriorProp {
     this.sit,
     this.sleep = false,
     this.relaxScene = false,
+    this.wardrobe = false,
     this.art,
     this.artTurns = 0,
   });
@@ -175,7 +181,8 @@ InteriorLayout buildInterior(String locationId) {
             color: 0xFFA68A64,
             label: 'CLOSET',
             interactLabel: 'Open the closet',
-            message: 'Two school uniforms and a hoodie.',
+            message: 'Five tees and five pairs of shorts, all yours.',
+            wardrobe: true,
             art: 'home_closet.png',
           ),
           InteriorProp(

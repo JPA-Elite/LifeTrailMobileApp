@@ -32,6 +32,13 @@ abstract interface class RelaxationSeat {
   bool get opensRelaxScene;
 }
 
+/// Opt-in marker for props that open the wardrobe scene (the home closet):
+/// a full-screen dress-up room with five tees and five shorts.
+abstract interface class Wardrobe {
+  /// True when tapping this prop opens the wardrobe scene.
+  bool get opensWardrobe;
+}
+
 class LifeInteractContext {
   final void Function(String message) showMessage;
 

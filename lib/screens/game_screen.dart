@@ -21,9 +21,11 @@ import '../widgets/dialogue_box.dart';
 import '../widgets/mini_map.dart';
 import '../models/location_dialogue.dart';
 import '../models/npc_model.dart';
+import '../models/outfit.dart';
 import '../models/player_model.dart';
 import '../models/quest_model.dart';
 import 'sofa_relax_screen.dart';
+import 'wardrobe_screen.dart';
 
 /// A tracked map pointer: position + landing time for pinch pairing.
 class _TouchDown {
@@ -475,6 +477,47 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     });
   }
 
+  /// Home closet: open the dress-up room. Changes are applied to the player
+  /// model immediately, so the sprite behind the scene updates as soon as
+  /// the player picks a tee or a pair of shorts.
+  void _openWardrobe() {
+    AudioService().interact();
+    showGeneralDialog<WardrobeResult>(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: 'Close the closet',
+      barrierColor: Colors.black.withAlpha(200),
+      transitionDuration: const Duration(milliseconds: 450),
+      pageBuilder: (_, animation, second) => const WardrobeScreen(),
+      transitionBuilder: (_, animation, second, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    ).then((result) {
+      if (!mounted || result == null) return;
+      final player = ref.read(gameStateProvider).player;
+      final tee = OutfitCatalog.shirtAt(player.shirtIndex);
+      final bottoms = OutfitCatalog.shortsAt(player.shortsIndex);
+      if (result.changed) {
+        _flashMessage(
+          'Looking sharp — ${tee.name} with ${bottoms.name}.',
+          seconds: 4,
+        );
+      } else {
+        _flashMessage('You close the closet. ${tee.name} it is.', seconds: 3);
+      }
+    });
+  }
+
   /// Bed interaction: confirm, fade to black, sleep to next morning 07:00
   /// with full energy, then fade back revealing the new day.
   Future<void> _sleepInBed() async {
@@ -527,6 +570,14 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   void _sitOrInteract() {
     final target = _nearest;
     if (target == null) return;
+    // The home closet opens the dress-up room.
+    if (target is Wardrobe) {
+      final wardrobe = target as Wardrobe;
+      if (wardrobe.opensWardrobe) {
+        _openWardrobe();
+        return;
+      }
+    }
     // The home sofa opens the dedicated relaxation scene; every other
     // seat keeps the quick sit-and-rest action.
     if (target is RelaxationSeat) {
@@ -610,6 +661,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     if (game != null) {
       game.setDayPeriod(gs.time.period);
       game.setRunning(_running);
+      game.setPlayerOutfit(gs.player.shirtIndex, gs.player.shortsIndex);
     }
 
     return Scaffold(

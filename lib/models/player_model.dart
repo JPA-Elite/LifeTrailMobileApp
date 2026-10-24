@@ -1,3 +1,5 @@
+import 'outfit.dart';
+
 class PlayerModel {
   static const int healthMax = 100;
   static const int energyMax = 100;
@@ -15,6 +17,12 @@ class PlayerModel {
   final int attendanceTaken;
   final int attendancePresent;
 
+  /// Index into [OutfitCatalog.shirts] for the tee the player is wearing.
+  final int shirtIndex;
+
+  /// Index into [OutfitCatalog.shorts] for the shorts the player is wearing.
+  final int shortsIndex;
+
   const PlayerModel({
     this.health = 85,
     this.energy = 80,
@@ -27,6 +35,8 @@ class PlayerModel {
     this.locationId = 'home',
     this.attendanceTaken = 0,
     this.attendancePresent = 0,
+    this.shirtIndex = 0,
+    this.shortsIndex = 0,
   });
 
   double get attendanceRate =>
@@ -47,6 +57,8 @@ class PlayerModel {
     String? locationId,
     int? attendanceTaken,
     int? attendancePresent,
+    int? shirtIndex,
+    int? shortsIndex,
   }) {
     return PlayerModel(
       health: (health ?? this.health).clamp(0, healthMax),
@@ -60,6 +72,8 @@ class PlayerModel {
       locationId: locationId ?? this.locationId,
       attendanceTaken: attendanceTaken ?? this.attendanceTaken,
       attendancePresent: attendancePresent ?? this.attendancePresent,
+      shirtIndex: OutfitCatalog.clampShirt(shirtIndex ?? this.shirtIndex),
+      shortsIndex: OutfitCatalog.clampShorts(shortsIndex ?? this.shortsIndex),
     );
   }
 
@@ -75,6 +89,8 @@ class PlayerModel {
     'locationId': locationId,
     'attendanceTaken': attendanceTaken,
     'attendancePresent': attendancePresent,
+    'shirtIndex': shirtIndex,
+    'shortsIndex': shortsIndex,
   };
 
   factory PlayerModel.fromJson(Map<String, dynamic> json) => PlayerModel(
@@ -89,5 +105,11 @@ class PlayerModel {
     locationId: json['locationId'] as String? ?? 'home',
     attendanceTaken: (json['attendanceTaken'] as num?)?.toInt() ?? 0,
     attendancePresent: (json['attendancePresent'] as num?)?.toInt() ?? 0,
+    shirtIndex: OutfitCatalog.clampShirt(
+      (json['shirtIndex'] as num?)?.toInt() ?? 0,
+    ),
+    shortsIndex: OutfitCatalog.clampShorts(
+      (json['shortsIndex'] as num?)?.toInt() ?? 0,
+    ),
   );
 }
