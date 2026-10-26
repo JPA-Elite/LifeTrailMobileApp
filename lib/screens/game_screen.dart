@@ -15,6 +15,7 @@ import '../services/save_service.dart';
 import '../services/audio_service.dart';
 import 'atm_screen.dart';
 import '../game/world/map_data.dart';
+import '../game/world/vehicle.dart';
 import '../widgets/game_hud.dart';
 import '../widgets/action_buttons.dart';
 import '../widgets/dialogue_box.dart';
@@ -238,6 +239,27 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         onSitDown: _performSitDown,
         onSleepInBed: _sleepInBed,
         onUseAtm: _openAtm,
+        // Walking burns 1 energy per minute, running 1 per 30 seconds.
+        // GameState clamps at zero, so this is safe even when exhausted.
+        onExertion: (points) {
+          final gs = ref.read(gameStateProvider);
+          if (!mounted || gs.player.energy <= 0) return;
+          gs.changeEnergy(-points);
+        },
+        // Each vehicle impact costs exactly 1 health (LifeGame rate-limits
+        // repeats to one hit every two seconds).
+        onVehicleCrash: (kind) {
+          final gs = ref.read(gameStateProvider);
+          if (!mounted || gs.player.health <= 0) return;
+          gs.changeHealth(-1);
+          HapticFeedback.heavyImpact();
+          AudioService().interact();
+          _flashMessage(
+            kind == VehicleKind.bicycle
+                ? 'A bicycle hit you! -1 health.'
+                : 'A car hit you! -1 health.',
+          );
+        },
       );
       if (mounted) setState(() {});
       _waitForGameReady();

@@ -12,6 +12,7 @@ import 'world/interior_data.dart';
 import 'world/interactable.dart';
 import 'world/life_world.dart';
 import 'world/mini_map_scene.dart';
+import 'world/vehicle.dart';
 
 class LifeGame extends FlameGame {
   final void Function(Interactable?) onNearestChanged;
@@ -38,6 +39,31 @@ class LifeGame extends FlameGame {
 
   /// Using the town ATM (wired in GameScreen, no-op in tests).
   final void Function() onUseAtm;
+
+  /// Reports energy points earned by movement: one point per
+  /// [walkSecondsPerEnergy] seconds walking or [runSecondsPerEnergy] seconds
+  /// running. Wired to GameState in GameScreen.
+  final void Function(int points) onExertion;
+
+  /// Reports a collision with a moving vehicle (car or bicycle) so the app
+  /// can deduct health and show a message. Rate-limited by
+  /// [crashCooldownSeconds].
+  final void Function(VehicleKind kind) onVehicleCrash;
+
+  /// Energy economy: walking costs 1 energy per minute, running 1 per 30s.
+  static const double walkSecondsPerEnergy = 60;
+  static const double runSecondsPerEnergy = 30;
+
+  /// A crash can only hurt once per two seconds, so a car dragging along the
+  /// player cannot drain the health bar in a handful of frames.
+  static const double crashCooldownSeconds = 2;
+
+  /// Vehicles slower than this are treated as parked and simply block.
+  static const double crashMinVehicleSpeed = 24;
+
+  double _walkExertionSeconds = 0;
+  double _runExertionSeconds = 0;
+  double _crashCooldown = 0;
 
   /// Randomness for the wandering townspeople (seed it in tests).
   final Random random;
@@ -127,11 +153,15 @@ class LifeGame extends FlameGame {
     void Function()? onSitDown,
     void Function()? onSleepInBed,
     void Function()? onUseAtm,
+    void Function(int points)? onExertion,
+    void Function(VehicleKind kind)? onVehicleCrash,
     Random? random,
     this.canEnterLocation,
   }) : onSitDown = onSitDown ?? (() {}),
        onSleepInBed = onSleepInBed ?? (() {}),
        onUseAtm = onUseAtm ?? (() {}),
+       onExertion = onExertion ?? ((_) {}),
+       onVehicleCrash = onVehicleCrash ?? ((_) {}),
        random = random ?? Random();
 
   LifeInteractContext get interactContext => LifeInteractContext(
@@ -376,6 +406,39 @@ class LifeGame extends FlameGame {
     });
   }
 
+  /// Accumulates movement time and reports whole energy points. Partial
+  /// seconds survive gait changes so a player alternating walk/run is not
+  /// charged twice or short-changed.
+  void _trackExertion(PlayerComponent hero, double dt) {
+    if (!hero.isMoving) return;
+    if (hero.running) {
+      _runExertionSeconds += dt;
+    } else {
+      _walkExertionSeconds += dt;
+    }
+    var points = 0;
+    while (_walkExertionSeconds >= walkSecondsPerEnergy) {
+      _walkExertionSeconds -= walkSecondsPerEnergy;
+      points++;
+    }
+    while (_runExertionSeconds >= runSecondsPerEnergy) {
+      _runExertionSeconds -= runSecondsPerEnergy;
+      points++;
+    }
+    if (points > 0) onExertion(points);
+  }
+
+  void _detectVehicleCrash(PlayerComponent hero, TownWorld town) {
+    if (_crashCooldown > 0) return;
+    final hit = town.movingVehicleOverlapping(
+      hero.feetRect,
+      minSpeed: crashMinVehicleSpeed,
+    );
+    if (hit == null) return;
+    _crashCooldown = crashCooldownSeconds;
+    onVehicleCrash(hit.kind);
+  }
+
   @override
   void update(double dt) {
     // Clamp wild time steps after hitches (shader compiles on a fresh
@@ -389,6 +452,12 @@ class LifeGame extends FlameGame {
     if (hero != null && stick != null) hero.moveInput = stick.relativeDelta;
 
     super.update(dt);
+
+    // Crash immunity ticks even while the player is inside a building, so a
+    // trip through a door can never leave a stale cooldown behind.
+    if (_crashCooldown > 0) {
+      _crashCooldown = max(0, _crashCooldown - dt);
+    }
 
     // Ease the camera toward the pinch target (~10/s): smooth glide
     // even when touch events arrive late or drop on a real phone.
@@ -415,6 +484,16 @@ class LifeGame extends FlameGame {
     final world = _activeWorld;
     if (!isLoaded || hero == null || world == null) return;
 
+    // Walking / running drains energy. Exertion follows the joystick input,
+    // so an idle stick never spends energy, and switching gait keeps whatever
+    // fraction already accrued.
+    _trackExertion(hero, dt);
+
+    // Traffic is solid, so the hero can no longer walk through a car or a
+    // bicycle. A moving vehicle that reaches the feet also hurts: report it
+    // before the collision resolver pushes the player clear.
+    if (world is TownWorld) _detectVehicleCrash(hero, world);
+
     // Report the position for the minimap (no rebuild while standing still).
     playerMapPosition.value = Vector2(hero.position.x, hero.position.y);
 
@@ -439,7 +518,7 @@ class LifeGame extends FlameGame {
     resolveFeetCollision(
       position: hero.position,
       previous: hero.previousPosition,
-      solids: world.solidBounds(),
+      solids: world.collisionBounds(),
     );
     clampToScene();
 

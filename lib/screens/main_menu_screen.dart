@@ -202,8 +202,12 @@ class _MainMenuState extends ConsumerState<MainMenuScreen> {
                             icon: Icons.save_outlined,
                             label: 'Slots',
                             compact: true,
-                            onPressed: () =>
-                                Navigator.of(context).pushNamed('/save-load'),
+                            onPressed: () async {
+                              await Navigator.of(
+                                context,
+                              ).pushNamed('/save-load');
+                              await _check();
+                            },
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -212,8 +216,12 @@ class _MainMenuState extends ConsumerState<MainMenuScreen> {
                             icon: Icons.settings_outlined,
                             label: 'Settings',
                             compact: true,
-                            onPressed: () =>
-                                Navigator.of(context).pushNamed('/settings'),
+                            onPressed: () async {
+                              await Navigator.of(
+                                context,
+                              ).pushNamed('/settings');
+                              await _check();
+                            },
                           ),
                         ),
                       ],

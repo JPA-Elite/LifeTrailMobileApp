@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/app.dart';
+import 'services/audio_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AudioService().init();
   // Landscape only, auto-rotating left/right (portrait never engages).
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,

@@ -119,8 +119,47 @@ class GameState extends ChangeNotifier {
     return const MoneyResult(true);
   }
 
-  void applyEnergy(int delta) {
-    player = player.copyWith(energy: player.energy + delta);
+  void applyEnergy(int delta) => changeEnergy(delta);
+
+  /// Adds [delta] energy, clamped to the player's limits. Walking and running
+  /// call this with a small negative value; activities call it directly too.
+  void changeEnergy(int delta) {
+    if (delta == 0) return;
+    final next = (player.energy + delta)
+        .clamp(0, PlayerModel.energyMax)
+        .toInt();
+    if (next == player.energy) return;
+    player = player.copyWith(energy: next);
+    notifyListeners();
+  }
+
+  /// Adds [delta] health, clamped to 0..[PlayerModel.healthMax]. Vehicle
+  /// crashes call this with -1; healing items can call it with a positive
+  /// value.
+  void changeHealth(int delta) {
+    if (delta == 0) return;
+    final next = (player.health + delta)
+        .clamp(0, PlayerModel.healthMax)
+        .toInt();
+    if (next == player.health) return;
+    player = player.copyWith(health: next);
+    _checkQuestUnlocks();
+    notifyListeners();
+  }
+
+  /// Clears the in-memory session after "Reset all progress" deletes every
+  /// save slot. The menu sees an unloaded state again, so Continue is disabled
+  /// until a new game starts.
+  void reset() {
+    player = const PlayerModel();
+    time = GameTime.morning(1);
+    npcs = {};
+    quests = {};
+    flags = {};
+    inventory = [];
+    weather = WeatherKind.sunny;
+    chapter = 1;
+    _loaded = false;
     notifyListeners();
   }
 

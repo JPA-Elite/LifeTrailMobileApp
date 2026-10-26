@@ -13,6 +13,11 @@ abstract class LifeWorld extends World {
   /// Everything the player collides with (buildings, walls, props).
   List<PositionComponent> solidBounds();
 
+  /// Solid bodies that block the *player* this frame. Defaults to the static
+  /// scenery; the town adds its moving traffic so the hero cannot walk
+  /// through parked or cruising vehicles.
+  List<PositionComponent> collisionBounds() => solidBounds();
+
   /// Interactables that are not solids, e.g. interior doorways. NPC markers
   /// are tracked separately because they are spawned dynamically.
   List<Interactable> interactables() => const [];

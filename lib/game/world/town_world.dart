@@ -21,6 +21,11 @@ class TownWorld extends LifeWorld implements TrafficHost {
   late final List<StreetProp> streetProps;
   final List<Pedestrian> pedestrians = [];
   final List<PositionComponent> _solids = [];
+
+  /// Static solids plus every vehicle, rebuilt once traffic has spawned.
+  /// Kept separate from [solidBounds] so pedestrian tests and walk-band
+  /// checks still see only permanent scenery.
+  final List<PositionComponent> _playerSolids = [];
   late final List<Rect> _walkBands = buildPedestrianBands();
 
   /// Live traffic: staggered signals, cars and bicycles per highway.
@@ -59,6 +64,25 @@ class TownWorld extends LifeWorld implements TrafficHost {
 
   @override
   List<PositionComponent> solidBounds() => _solids;
+
+  /// The player is blocked by the permanent scenery *and* by traffic.
+  @override
+  List<PositionComponent> collisionBounds() =>
+      _playerSolids.isEmpty ? _solids : _playerSolids;
+
+  /// The nearest vehicle moving faster than [minSpeed] whose body overlaps
+  /// [feet], or null when the player is clear. Used both for crash damage and
+  /// to keep a stopped car from being treated as a collision hazard.
+  VehicleComponent? movingVehicleOverlapping(
+    Rect feet, {
+    double minSpeed = 24,
+  }) {
+    for (final vehicle in vehicles) {
+      if (vehicle.speed < minSpeed) continue;
+      if (feet.overlaps(vehicle.toRect())) return vehicle;
+    }
+    return null;
+  }
 
   @override
   Future<void> onLoad() async {
@@ -434,6 +458,10 @@ class TownWorld extends LifeWorld implements TrafficHost {
     for (final v in vehicles) {
       add(v);
     }
+    _playerSolids
+      ..clear()
+      ..addAll(_solids)
+      ..addAll(vehicles);
   }
 }
 
