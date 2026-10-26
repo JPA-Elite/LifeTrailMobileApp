@@ -22,12 +22,52 @@ class CookingResult {
   final String? lastCooked;
 }
 
+/// A single timed cooking session shown in the full-screen stove scene.
+class _CookSession {
+  const _CookSession({
+    required this.title,
+    required this.emoji,
+    required this.accent,
+    required this.accentDeep,
+    required this.minutes,
+    required this.plateEnergy,
+    required this.energyCost,
+    required this.ingredients,
+  });
+
+  final String title;
+  final String emoji;
+  final Color accent;
+  final Color accentDeep;
+
+  /// In-game minutes the stove runs for.
+  final int minutes;
+  final int plateEnergy;
+  final int energyCost;
+  final Map<String, int> ingredients;
+
+  String get ingredientSummary {
+    final parts = <String>[];
+    ingredients.forEach((id, count) {
+      final ingredient = PantryCatalog.byId(id);
+      final label = ingredient?.name ?? id;
+      parts.add(count > 1 ? '$label ×$count' : label);
+    });
+    return parts.join(' · ');
+  }
+
+  List<PantryIngredient> get ingredientItems => [
+    for (final entry in ingredients.entries)
+      if (PantryCatalog.byId(entry.key) != null) PantryCatalog.byId(entry.key)!,
+  ];
+}
+
 /// Full-screen kitchen and pantry.
 ///
-/// The left side holds the three meal recipes; the right side is the actual
-/// pantry stock, read from the inventory. Cooking consumes the listed
-/// ingredients and adds a plated meal to the table, so buying groceries
-/// later automatically enlarges what can be cooked.
+/// The builder turns the pantry into a live plate: every added portion raises
+/// the energy value, the stove time, and the eating time. Fixed family recipes
+/// remain one tap away, and every cook runs through a timed stove scene before
+/// the ingredients are spent.
 class CookingScreen extends ConsumerStatefulWidget {
   const CookingScreen({super.key});
 
@@ -36,12 +76,16 @@ class CookingScreen extends ConsumerStatefulWidget {
 }
 
 class _CookingScreenState extends ConsumerState<CookingScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _ambient;
-  CookingRecipe? _cookingRecipe;
-  CookingRecipe? _lastCooked;
+  late final AnimationController _cook;
+
+  final Map<String, int> _counts = {};
+  _CookSession? _session;
+  CookedMeal? _lastCooked;
   String? _notice;
   bool _cooking = false;
+  bool _customMode = true;
 
   @override
   void initState() {
@@ -50,58 +94,206 @@ class _CookingScreenState extends ConsumerState<CookingScreen>
       vsync: this,
       duration: const Duration(seconds: 18),
     )..repeat();
+    _cook = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    );
   }
 
   @override
   void dispose() {
     _ambient.dispose();
+    _cook.dispose();
     super.dispose();
   }
 
-  Future<void> _cook(CookingRecipe recipe) async {
+  CustomCookPlan get _plan => CookingCatalog.planCustom(_counts);
+
+  int get _portions => _counts.values.fold(0, (total, count) => total + count);
+
+  int _durationMs(int minutes) =>
+      (900 + minutes * 38).clamp(1800, 5200).toInt();
+
+  void _bump(String ingredientId, int delta, GameState state) {
     if (_cooking) return;
-    final gs = ref.read(gameStateProvider);
-    if (!gs.canDoActivity(recipe.activityId)) {
+    final current = _counts[ingredientId] ?? 0;
+    if (delta > 0) {
+      final canAdd =
+          _portions < CookingCatalog.maxCustomPortions &&
+          current < state.itemCount(ingredientId);
+      if (!canAdd) {
+        HapticFeedback.selectionClick();
+        if (current >= state.itemCount(ingredientId)) {
+          setState(
+            () => _notice =
+                'No more ${PantryCatalog.byId(ingredientId)?.name ?? 'stock'} '
+                'in the pantry.',
+          );
+        } else {
+          setState(
+            () => _notice =
+                'A plate holds at most '
+                '${CookingCatalog.maxCustomPortions} portions.',
+          );
+        }
+        return;
+      }
+      _counts[ingredientId] = current + 1;
+    } else {
+      if (current <= 0) return;
+      final next = current - 1;
+      if (next <= 0) {
+        _counts.remove(ingredientId);
+      } else {
+        _counts[ingredientId] = next;
+      }
+    }
+    HapticFeedback.selectionClick();
+    setState(() => _notice = null);
+  }
+
+  void _chefPick(GameState state) {
+    if (_cooking) return;
+    final order = switch (state.time.period) {
+      DayPeriod.morning => ['egg', 'bread', 'milk', 'tomato', 'cheese'],
+      DayPeriod.afternoon => ['rice', 'chicken', 'vegetables', 'tomato'],
+      DayPeriod.evening => ['noodles', 'vegetables', 'chicken', 'cheese'],
+      DayPeriod.night => ['rice', 'egg', 'vegetables', 'cheese'],
+    };
+    final picked = <String, int>{};
+    var total = 0;
+    for (var round = 0; round < 2 && total < 3; round++) {
+      for (final id in order) {
+        if (total >= 3) break;
+        final stock = state.itemCount(id);
+        final have = picked[id] ?? 0;
+        if (stock > have) {
+          picked[id] = have + 1;
+          total++;
+        }
+      }
+    }
+    if (total == 0) {
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _notice =
+            'The pantry is empty. Pick up a grocery bundle at the Super '
+            'Market.';
+      });
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _counts
+        ..clear()
+        ..addAll(picked);
+      _notice = null;
+      _customMode = true;
+    });
+  }
+
+  Future<void> _startPlan() async {
+    if (_cooking) return;
+    final plan = _plan;
+    if (plan.isEmpty) {
+      HapticFeedback.heavyImpact();
+      setState(() => _notice = 'Add at least one ingredient to the plate.');
+      return;
+    }
+    final state = ref.read(gameStateProvider);
+    if (!state.canCookCustom(plan)) {
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _notice = state.player.energy < plan.cookEnergyCost
+            ? 'Too tired to cook. Rest on the sofa first.'
+            : 'Some of those ingredients just ran out.';
+      });
+      return;
+    }
+    await _runCook(plan: plan);
+  }
+
+  Future<void> _startRecipe(CookingRecipe recipe) async {
+    if (_cooking) return;
+    final state = ref.read(gameStateProvider);
+    if (!state.canDoActivity(recipe.activityId)) {
       HapticFeedback.heavyImpact();
       setState(() {
         _notice = 'Too tired to cook. Sit down for a moment first.';
       });
       return;
     }
-    if (!gs.hasItems(recipe.ingredients)) {
+    if (!state.hasItems(recipe.ingredients)) {
       HapticFeedback.heavyImpact();
       setState(() {
         final missing = recipe.ingredients.entries
-            .where((e) => gs.itemCount(e.key) < e.value)
+            .where((e) => state.itemCount(e.key) < e.value)
             .map((e) => PantryCatalog.byId(e.key)?.name ?? e.key)
             .join(', ');
         _notice = 'Missing $missing. The Super Market can restock the pantry.';
       });
       return;
     }
-    final cooked = gs.cookMeal(recipe);
-    if (!cooked) {
-      setState(() => _notice = 'The stove needs a moment. Try again.');
-      return;
-    }
+    await _runCook(recipe: recipe);
+  }
+
+  Future<void> _runCook({CookingRecipe? recipe, CustomCookPlan? plan}) async {
+    final cfg = recipe == null ? null : Activities.of(recipe.activityId);
+    final minutes = plan?.cookMinutes ?? cfg?.minutes ?? 30;
+    final session = _CookSession(
+      title: plan?.name ?? recipe!.title,
+      emoji: plan?.emoji ?? recipe!.emoji,
+      accent: plan?.accent ?? recipe!.accent,
+      accentDeep: plan?.accentDeep ?? recipe!.accentDeep,
+      minutes: minutes,
+      plateEnergy: plan?.energy ?? recipe!.eatEnergy,
+      energyCost: plan?.cookEnergyCost ?? cfg!.energyDelta.abs(),
+      ingredients: plan?.ingredients ?? recipe!.ingredients,
+    );
+
+    _cook.duration = Duration(milliseconds: _durationMs(minutes));
     HapticFeedback.mediumImpact();
     setState(() {
       _cooking = true;
-      _cookingRecipe = recipe;
+      _session = session;
       _notice = null;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 1150));
+
+    await _cook.forward(from: 0);
     if (!mounted) return;
+
+    final state = ref.read(gameStateProvider);
+    final success = plan != null
+        ? state.cookCustomMeal(plan) != null
+        : state.cookMeal(recipe!);
+    if (!mounted) return;
+    if (!success) {
+      _cook.reset();
+      setState(() {
+        _cooking = false;
+        _session = null;
+        _notice = 'The stove needs a moment. Try again.';
+      });
+      return;
+    }
+
+    HapticFeedback.mediumImpact();
     setState(() {
+      _lastCooked = plan?.meal ?? recipe!.toMeal();
       _cooking = false;
-      _cookingRecipe = null;
-      _lastCooked = recipe;
+      _session = null;
+      if (plan != null) {
+        _counts.clear();
+        _customMode = true;
+      }
     });
+    _cook.reset();
     HapticFeedback.lightImpact();
   }
 
   void _close() {
-    Navigator.of(context).pop(CookingResult(lastCooked: _lastCooked?.mealName));
+    if (_cooking) return;
+    Navigator.of(context).pop(CookingResult(lastCooked: _lastCooked?.name));
   }
 
   @override
@@ -109,72 +301,76 @@ class _CookingScreenState extends ConsumerState<CookingScreen>
     final state = ref.watch(gameStateProvider);
     final period = state.time.period;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF16110D),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          AnimatedBuilder(
-            animation: _ambient,
-            builder: (context, _) => CustomPaint(
-              painter: _KitchenPainter(
-                t: _ambient.value,
-                period: period,
-                cooking: _cooking,
+    return PopScope(
+      canPop: !_cooking,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF16110D),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            AnimatedBuilder(
+              animation: _ambient,
+              builder: (context, _) => CustomPaint(
+                painter: _KitchenPainter(
+                  t: _ambient.value,
+                  period: period,
+                  cooking: _cooking,
+                ),
               ),
             ),
-          ),
-          SafeArea(
-            minimum: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-            child: Column(
-              children: [
-                _header(state),
-                if (_notice != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: _NoticePill(text: _notice!),
-                  ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      if (constraints.maxWidth >= 720) {
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
+            SafeArea(
+              minimum: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+              child: Column(
+                children: [
+                  _header(state),
+                  if (_notice != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: _NoticePill(text: _notice!),
+                    ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        if (constraints.maxWidth >= 720) {
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(flex: 7, child: _cookColumn(state)),
+                              const SizedBox(width: 10),
+                              SizedBox(
+                                width: 286,
+                                child: _pantryPanel(state, period),
+                              ),
+                            ],
+                          );
+                        }
+                        return Column(
                           children: [
-                            Expanded(flex: 7, child: _recipeColumn(state)),
-                            const SizedBox(width: 10),
+                            Expanded(child: _cookColumn(state)),
+                            const SizedBox(height: 8),
                             SizedBox(
-                              width: 286,
+                              height: 118,
                               child: _pantryPanel(state, period),
                             ),
                           ],
                         );
-                      }
-                      return Column(
-                        children: [
-                          Expanded(child: _recipeColumn(state)),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            height: 126,
-                            child: _pantryPanel(state, period),
-                          ),
-                        ],
-                      );
-                    },
+                      },
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          if (_cooking && _cookingRecipe != null)
-            Positioned.fill(
-              child: _CookingOverlay(
-                recipe: _cookingRecipe!,
-                ambient: _ambient,
+                ],
               ),
             ),
-        ],
+            if (_cooking && _session != null)
+              Positioned.fill(
+                child: _CookingOverlay(
+                  session: _session!,
+                  progress: _cook,
+                  ambient: _ambient,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -222,7 +418,7 @@ class _CookingScreenState extends ConsumerState<CookingScreen>
                 ),
               ),
               Text(
-                'Cook now, eat at the dining table.',
+                'Build a plate, then eat it at the dining table.',
                 style: TextStyle(color: Color(0xFFD8C8B5), fontSize: 10.5),
               ),
             ],
@@ -263,7 +459,7 @@ class _CookingScreenState extends ConsumerState<CookingScreen>
     );
   }
 
-  Widget _recipeColumn(GameState state) {
+  Widget _cookColumn(GameState state) {
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
       decoration: BoxDecoration(
@@ -276,18 +472,25 @@ class _CookingScreenState extends ConsumerState<CookingScreen>
         children: [
           Row(
             children: [
-              const Text(
-                'What are we cooking?',
-                style: TextStyle(
-                  color: Color(0xFFFFF4DF),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                ),
+              _ModeChip(
+                key: const ValueKey('custom-mode'),
+                label: 'Custom plate',
+                icon: Icons.tune_rounded,
+                selected: _customMode,
+                onTap: () => setState(() => _customMode = true),
+              ),
+              const SizedBox(width: 5),
+              _ModeChip(
+                key: const ValueKey('classic-mode'),
+                label: 'Family recipes',
+                icon: Icons.menu_book_rounded,
+                selected: !_customMode,
+                onTap: () => setState(() => _customMode = false),
               ),
               const Spacer(),
               Text(
                 'Pantry ${_pantryTotal(state)} items',
-                style: const TextStyle(color: Color(0xFFC4B39F), fontSize: 10),
+                style: const TextStyle(color: Color(0xFFC4B39F), fontSize: 9),
               ),
             ],
           ),
@@ -296,30 +499,137 @@ class _CookingScreenState extends ConsumerState<CookingScreen>
             Padding(
               padding: const EdgeInsets.only(bottom: 5),
               child: _PlatedBanner(
-                recipe: _lastCooked!,
+                meal: _lastCooked!,
                 onTable: () =>
                     Navigator.of(context).pop(CookingResult(openTable: true)),
                 onDismiss: () => setState(() => _lastCooked = null),
               ),
             ),
           Expanded(
-            child: ListView.separated(
-              padding: EdgeInsets.zero,
-              itemCount: CookingCatalog.recipes.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 6),
-              itemBuilder: (context, index) {
-                final recipe = CookingCatalog.recipes[index];
-                return _RecipeCard(
-                  recipe: recipe,
-                  state: state,
-                  isFavorite: state.time.period == recipe.bestPeriod,
-                  onCook: () => _cook(recipe),
-                );
-              },
-            ),
+            child: _customMode ? _customBuilder(state) : _classicRecipes(state),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _customBuilder(GameState state) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _PlatePreview(plan: _plan, portions: _portions),
+        const SizedBox(height: 6),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 520 ? 3 : 2;
+              final width =
+                  (constraints.maxWidth - (columns - 1) * 6) / columns;
+              return SingleChildScrollView(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 5,
+                  children: [
+                    for (final ingredient in PantryCatalog.ingredients)
+                      SizedBox(
+                        width: width,
+                        child: _IngredientSelector(
+                          ingredient: ingredient,
+                          stock: state.itemCount(ingredient.id),
+                          selected: _counts[ingredient.id] ?? 0,
+                          canAdd:
+                              _portions < CookingCatalog.maxCustomPortions &&
+                              (_counts[ingredient.id] ?? 0) <
+                                  state.itemCount(ingredient.id),
+                          onAdd: () => _bump(ingredient.id, 1, state),
+                          onRemove: () => _bump(ingredient.id, -1, state),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 5),
+        Row(
+          children: [
+            SizedBox(
+              height: 34,
+              child: OutlinedButton.icon(
+                key: const ValueKey('chef-pick'),
+                onPressed: () => _chefPick(state),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFFFD166),
+                  side: BorderSide(
+                    color: const Color(0xFFFFD166).withAlpha(110),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                ),
+                icon: const Icon(Icons.auto_awesome_rounded, size: 13),
+                label: const Text(
+                  "Chef's pick",
+                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: SizedBox(
+                height: 34,
+                child: FilledButton.icon(
+                  key: const ValueKey('start-custom-cook'),
+                  onPressed: _plan.isEmpty ? null : _startPlan,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _plan.isEmpty
+                        ? Colors.white10
+                        : _plan.accentDeep,
+                    foregroundColor: const Color(0xFFFFF4DF),
+                    disabledBackgroundColor: Colors.white10,
+                    disabledForegroundColor: Colors.white38,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                  ),
+                  icon: const Icon(
+                    Icons.local_fire_department_rounded,
+                    size: 15,
+                  ),
+                  label: Text(
+                    _plan.isEmpty
+                        ? 'Add ingredients to cook'
+                        : 'Start cooking  ·  ${_plan.cookMinutes} min',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _classicRecipes(GameState state) {
+    return ListView.separated(
+      padding: EdgeInsets.zero,
+      itemCount: CookingCatalog.recipes.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 6),
+      itemBuilder: (context, index) {
+        final recipe = CookingCatalog.recipes[index];
+        return _RecipeCard(
+          recipe: recipe,
+          state: state,
+          isFavorite: state.time.period == recipe.bestPeriod,
+          onCook: () => _startRecipe(recipe),
+        );
+      },
     );
   }
 
@@ -431,6 +741,381 @@ class _CookingScreenState extends ConsumerState<CookingScreen>
   }
 }
 
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected
+          ? const Color(0xFFB7793E).withAlpha(190)
+          : Colors.black.withAlpha(90),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 12,
+                color: selected
+                    ? const Color(0xFFFFF4DF)
+                    : const Color(0xFFC4B39F),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected
+                      ? const Color(0xFFFFF4DF)
+                      : const Color(0xFFC4B39F),
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlatePreview extends StatelessWidget {
+  const _PlatePreview({required this.plan, required this.portions});
+
+  final CustomCookPlan plan;
+  final int portions;
+
+  @override
+  Widget build(BuildContext context) {
+    final empty = plan.isEmpty;
+    final accent = empty ? const Color(0xFF8E8071) : plan.accent;
+    final accentDeep = empty ? const Color(0xFF3A3028) : plan.accentDeep;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            accentDeep.withAlpha(165),
+            const Color(0xFF1A1410).withAlpha(225),
+          ],
+        ),
+        border: Border.all(color: accent.withAlpha(empty ? 60 : 150)),
+      ),
+      child: Row(
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [accent, accentDeep],
+              ),
+              boxShadow: [
+                BoxShadow(color: accent.withAlpha(40), blurRadius: 10),
+              ],
+            ),
+            child: Center(
+              child: Text(plan.emoji, style: const TextStyle(fontSize: 21)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        empty ? 'Your plate is empty' : plan.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFFFF4DF),
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    if (!empty) ...[
+                      const SizedBox(width: 5),
+                      Text(
+                        '$portions/${CookingCatalog.maxCustomPortions} portions',
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 7.8,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                Text(
+                  empty
+                      ? 'Tap + on a pantry ingredient. The energy and stove '
+                            'time update live.'
+                      : plan.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFC8B8A5),
+                    fontSize: 8.5,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 2,
+                  children: [
+                    _StatChip(
+                      icon: Icons.bolt_rounded,
+                      label: empty ? '— energy' : '+${plan.energy} energy',
+                      tint: const Color(0xFFFFD166),
+                    ),
+                    _StatChip(
+                      icon: Icons.local_fire_department_rounded,
+                      label: empty ? '— min' : '${plan.cookMinutes} min cook',
+                      tint: const Color(0xFFFFA36C),
+                    ),
+                    _StatChip(
+                      icon: Icons.restaurant_rounded,
+                      label: empty ? '— min' : '${plan.eatMinutes} min meal',
+                      tint: const Color(0xFF9ED9BD),
+                    ),
+                    _StatChip(
+                      icon: Icons.battery_charging_full_rounded,
+                      label: empty ? '— cost' : '-${plan.cookEnergyCost} now',
+                      tint: const Color(0xFF9BD8FF),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  const _StatChip({
+    required this.icon,
+    required this.label,
+    required this.tint,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(75),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tint.withAlpha(55)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 9, color: tint),
+          const SizedBox(width: 2),
+          Text(
+            label,
+            style: TextStyle(
+              color: tint,
+              fontSize: 7.7,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _IngredientSelector extends StatelessWidget {
+  const _IngredientSelector({
+    required this.ingredient,
+    required this.stock,
+    required this.selected,
+    required this.canAdd,
+    required this.onAdd,
+    required this.onRemove,
+  });
+
+  final PantryIngredient ingredient;
+  final int stock;
+  final int selected;
+  final bool canAdd;
+  final VoidCallback onAdd;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final chosen = selected > 0;
+    final empty = stock <= 0;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+      decoration: BoxDecoration(
+        color: chosen
+            ? ingredient.color.withAlpha(42)
+            : empty
+            ? const Color(0xFF1A1410).withAlpha(160)
+            : const Color(0xFF33261B).withAlpha(215),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(
+          color: chosen
+              ? ingredient.color.withAlpha(175)
+              : empty
+              ? Colors.white10
+              : ingredient.color.withAlpha(55),
+          width: chosen ? 1.3 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Opacity(
+            opacity: empty ? 0.35 : 1,
+            child: Text(ingredient.emoji, style: const TextStyle(fontSize: 17)),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  ingredient.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: empty
+                        ? const Color(0xFF8E8071)
+                        : const Color(0xFFFFF4DF),
+                    fontSize: 8.7,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  empty ? 'out of stock' : '$stock in pantry',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: empty
+                        ? const Color(0xFFB06A5E)
+                        : const Color(0xFFC4B39F),
+                    fontSize: 7.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _StepButton(
+            key: ValueKey('remove-${ingredient.id}'),
+            icon: Icons.remove_rounded,
+            enabled: selected > 0,
+            tint: ingredient.color,
+            onTap: onRemove,
+            semanticLabel: 'Remove one ${ingredient.name}',
+          ),
+          SizedBox(
+            width: 15,
+            child: Text(
+              '$selected',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: chosen
+                    ? const Color(0xFFFFF4DF)
+                    : const Color(0xFF8E8071),
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          _StepButton(
+            key: ValueKey('add-${ingredient.id}'),
+            icon: Icons.add_rounded,
+            enabled: canAdd,
+            tint: ingredient.color,
+            onTap: onAdd,
+            semanticLabel: 'Add one ${ingredient.name}',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepButton extends StatelessWidget {
+  const _StepButton({
+    super.key,
+    required this.icon,
+    required this.enabled,
+    required this.tint,
+    required this.onTap,
+    required this.semanticLabel,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final Color tint;
+  final VoidCallback onTap;
+  final String semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: semanticLabel,
+      button: true,
+      child: Material(
+        color: enabled ? tint.withAlpha(48) : Colors.white.withAlpha(8),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: enabled ? onTap : null,
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: Icon(icon, size: 13, color: enabled ? tint : Colors.white24),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HeaderPill extends StatelessWidget {
   const _HeaderPill({
     required this.icon,
@@ -538,12 +1223,12 @@ class _NoticePill extends StatelessWidget {
 
 class _PlatedBanner extends StatelessWidget {
   const _PlatedBanner({
-    required this.recipe,
+    required this.meal,
     required this.onTable,
     required this.onDismiss,
   });
 
-  final CookingRecipe recipe;
+  final CookedMeal meal;
   final VoidCallback onTable;
   final VoidCallback onDismiss;
 
@@ -552,17 +1237,17 @@ class _PlatedBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 5, 4, 5),
       decoration: BoxDecoration(
-        color: recipe.accentDeep.withAlpha(110),
+        color: meal.accentDeep.withAlpha(110),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: recipe.accent.withAlpha(160)),
+        border: Border.all(color: meal.accent.withAlpha(160)),
       ),
       child: Row(
         children: [
-          Text(recipe.emoji, style: const TextStyle(fontSize: 16)),
+          Text(meal.emoji, style: const TextStyle(fontSize: 16)),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              '${recipe.mealName} is plated. It is waiting on the table.',
+              '${meal.name} is plated. It is waiting on the table.',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -911,76 +1596,137 @@ class _PantryTile extends StatelessWidget {
 }
 
 class _CookingOverlay extends StatelessWidget {
-  const _CookingOverlay({required this.recipe, required this.ambient});
+  const _CookingOverlay({
+    required this.session,
+    required this.progress,
+    required this.ambient,
+  });
 
-  final CookingRecipe recipe;
+  final _CookSession session;
+  final Animation<double> progress;
   final Animation<double> ambient;
+
+  String _stage(double value) {
+    if (value < 0.16) return 'Heating the pan…';
+    if (value < 0.42) return 'Sizzling the first ingredients…';
+    if (value < 0.7) return 'Simmering low and slow…';
+    if (value < 0.92) return 'Seasoning and plating…';
+    return 'Ready to serve.';
+  }
 
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: Colors.black.withAlpha(170),
-      child: Center(
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: 1),
-          duration: const Duration(milliseconds: 1100),
-          builder: (context, value, _) {
-            return Container(
-              width: 320,
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF241A13),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: recipe.accent.withAlpha(140)),
-                boxShadow: [
-                  BoxShadow(color: recipe.accent.withAlpha(35), blurRadius: 30),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    height: 82,
-                    child: AnimatedBuilder(
-                      animation: ambient,
-                      builder: (context, _) => CustomPaint(
-                        painter: _PanPainter(
-                          recipe: recipe,
-                          t: ambient.value,
-                          progress: value,
+      color: const Color(0xFF0D0906).withAlpha(246),
+      child: SafeArea(
+        minimum: const EdgeInsets.all(18),
+        child: AnimatedBuilder(
+          animation: Listenable.merge([progress, ambient]),
+          builder: (context, _) {
+            final value = progress.value;
+            final minutesLeft = math.max(
+              0,
+              (session.minutes * (1 - value)).ceil(),
+            );
+            final sceneHeight = (MediaQuery.sizeOf(context).height * 0.36)
+                .clamp(130.0, 200.0);
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: sceneHeight,
+                        width: double.infinity,
+                        child: CustomPaint(
+                          painter: _StovePainter(
+                            t: ambient.value,
+                            progress: value,
+                            accent: session.accent,
+                            accentDeep: session.accentDeep,
+                            ingredients: session.ingredientItems,
+                          ),
                         ),
-                        size: const Size(240, 82),
                       ),
-                    ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Cooking ${session.title}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFFFF4DF),
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _stage(value),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFD8C8B5),
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 6,
+                        runSpacing: 5,
+                        children: [
+                          _OverlayChip(
+                            icon: Icons.timer_outlined,
+                            label: '$minutesLeft min left',
+                            tint: const Color(0xFFFFA36C),
+                          ),
+                          _OverlayChip(
+                            icon: Icons.bolt_rounded,
+                            label: '-${session.energyCost} now',
+                            tint: const Color(0xFF9BD8FF),
+                          ),
+                          _OverlayChip(
+                            icon: Icons.restaurant_rounded,
+                            label: '+${session.plateEnergy} when eaten',
+                            tint: const Color(0xFF9ED9BD),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        session.ingredientSummary,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFBCA98F),
+                          fontSize: 9.5,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          value: value,
+                          minHeight: 8,
+                          backgroundColor: Colors.white10,
+                          valueColor: AlwaysStoppedAnimation(session.accent),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '${session.minutes}-minute stove session',
+                        style: const TextStyle(
+                          color: Color(0xFFAE9C85),
+                          fontSize: 8.5,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Cooking ${recipe.title}',
-                    style: const TextStyle(
-                      color: Color(0xFFFFF4DF),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'The kitchen smells wonderful.',
-                    style: const TextStyle(
-                      color: Color(0xFFC8B8A5),
-                      fontSize: 10,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      value: value,
-                      minHeight: 6,
-                      backgroundColor: Colors.white10,
-                      valueColor: AlwaysStoppedAnimation(recipe.accent),
-                    ),
-                  ),
-                ],
+                ),
               ),
             );
           },
@@ -990,101 +1736,204 @@ class _CookingOverlay extends StatelessWidget {
   }
 }
 
-class _PanPainter extends CustomPainter {
-  _PanPainter({required this.recipe, required this.t, required this.progress});
+class _OverlayChip extends StatelessWidget {
+  const _OverlayChip({
+    required this.icon,
+    required this.label,
+    required this.tint,
+  });
 
-  final CookingRecipe recipe;
+  final IconData icon;
+  final String label;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: tint.withAlpha(20),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tint.withAlpha(75)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: tint),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: tint,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The stove scene behind the timed cooking HUD. Steam and flame are driven
+/// by the ambient loop; the pan fills as the cook timer advances.
+class _StovePainter extends CustomPainter {
+  _StovePainter({
+    required this.t,
+    required this.progress,
+    required this.accent,
+    required this.accentDeep,
+    required this.ingredients,
+  });
+
   final double t;
   final double progress;
+  final Color accent;
+  final Color accentDeep;
+  final List<PantryIngredient> ingredients;
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
-    // Stove ring.
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w / 2, h * 0.8),
-        width: w * 0.6,
-        height: h * 0.2,
-      ),
-      Paint()..color = const Color(0xFF0C0906),
+    final center = Offset(w / 2, h * 0.62);
+
+    // Warm halo around the stove.
+    canvas.drawCircle(
+      center,
+      h * 0.55,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [const Color(0xFFFFA34D).withAlpha(28), Colors.transparent],
+        ).createShader(Rect.fromCircle(center: center, radius: h * 0.55)),
     );
-    // Steam.
-    for (var i = 0; i < 4; i++) {
-      final x = w * 0.35 + i * w * 0.1;
-      final y = h * 0.28 - ((t + i * 0.18) % 1) * h * 0.2;
+
+    // Counter.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(w * 0.08, h * 0.78, w * 0.84, h * 0.12),
+        const Radius.circular(12),
+      ),
+      Paint()..color = const Color(0xFF2A1C12),
+    );
+
+    // Burner ring.
+    final burner = Rect.fromCenter(
+      center: center + Offset(0, h * 0.18),
+      width: w * 0.5,
+      height: h * 0.13,
+    );
+    canvas.drawOval(burner, Paint()..color = const Color(0xFF080605));
+    final flame = 0.75 + 0.25 * math.sin(t * math.pi * 10);
+    canvas.drawOval(
+      burner.deflate(5),
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            const Color(0xFFFFC857).withAlpha(130),
+            const Color(0xFFFF6B35).withAlpha(80),
+            Colors.transparent,
+          ],
+        ).createShader(burner),
+    );
+    for (var i = 0; i < 10; i++) {
+      final a = i * math.pi / 5 + t * 0.4;
+      final r = burner.width * 0.44;
+      final p =
+          center + Offset(math.cos(a) * r, h * 0.18 + math.sin(a) * r * 0.24);
       canvas.drawCircle(
-        Offset(x + math.sin((t + i) * math.pi * 2) * 6, y),
-        5.0 + i,
-        Paint()..color = Colors.white.withAlpha(28),
+        p,
+        3 * flame,
+        Paint()..color = const Color(0xFFFF8A3D).withAlpha(95),
       );
     }
-    // Pan.
+
+    // Frying pan.
     canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w * 0.52, h * 0.66),
-        width: w * 0.52,
-        height: h * 0.14,
-      ),
-      Paint()..color = const Color(0xFF3C3A3A),
+      Rect.fromCenter(center: center, width: w * 0.58, height: h * 0.2),
+      Paint()..color = const Color(0xFF34302D),
     );
     canvas.drawOval(
       Rect.fromCenter(
-        center: Offset(w * 0.52, h * 0.62),
-        width: w * 0.46,
-        height: h * 0.12,
+        center: center - Offset(0, h * 0.015),
+        width: w * 0.51,
+        height: h * 0.16,
       ),
-      Paint()..color = const Color(0xFF171515),
+      Paint()..color = const Color(0xFF141211),
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromLTWH(w * 0.74, h * 0.6, w * 0.24, h * 0.045),
-        const Radius.circular(5),
+        Rect.fromLTWH(w * 0.72, h * 0.55, w * 0.22, h * 0.045),
+        const Radius.circular(6),
       ),
-      Paint()..color = const Color(0xFF5E442F),
+      Paint()..color = const Color(0xFF4A2E1B),
     );
-    // Food.
+
+    // Food builds up as the timer advances.
+    final fill = progress.clamp(0.0, 1.0);
+    final foodWidth = w * (0.12 + 0.3 * fill);
+    final foodHeight = h * (0.05 + 0.09 * fill);
     canvas.drawOval(
       Rect.fromCenter(
-        center: Offset(w * 0.52, h * 0.62),
-        width: w * 0.34,
-        height: h * 0.075,
+        center: center - Offset(0, h * 0.015),
+        width: foodWidth,
+        height: foodHeight,
       ),
-      Paint()..color = recipe.accentDeep,
+      Paint()..color = accentDeep,
     );
     canvas.drawOval(
       Rect.fromCenter(
-        center: Offset(w * 0.52, h * 0.605),
-        width: w * 0.28,
-        height: h * 0.055,
+        center: center - Offset(0, h * 0.025),
+        width: foodWidth * 0.86,
+        height: foodHeight * 0.74,
       ),
-      Paint()..color = recipe.accent,
+      Paint()..color = accent,
     );
-    for (var i = 0; i < 5; i++) {
+
+    // Chunks of the chosen ingredients.
+    for (var i = 0; i < ingredients.length; i++) {
+      final ingredient = ingredients[i];
+      final a = t * math.pi * 2 + i * 1.3;
+      final x = center.dx + math.cos(a) * (foodWidth * 0.28);
+      final y = center.dy - h * 0.02 + math.sin(a * 1.3) * (foodHeight * 0.22);
       canvas.drawCircle(
-        Offset(w * (0.42 + i * 0.05), h * (0.6 + (i % 2) * 0.02)),
-        3,
-        Paint()..color = const Color(0xFFFFF4DF).withAlpha(160),
+        Offset(x, y),
+        3.0 + i * 0.5,
+        Paint()..color = ingredient.color.withAlpha(220),
       );
     }
-    // Flame hint.
-    final flicker = 0.7 + 0.3 * math.sin(t * math.pi * 8);
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w * 0.52, h * 0.8),
-        width: w * 0.18 * flicker,
-        height: h * 0.08 * flicker,
-      ),
-      Paint()..color = const Color(0xFFFF8A3D).withAlpha(120),
-    );
+
+    // Steam curls.
+    for (var i = 0; i < 5; i++) {
+      final phase = (t + i * 0.17) % 1;
+      final x = w * 0.36 + i * w * 0.07;
+      final y = h * 0.42 - phase * h * 0.29;
+      canvas.drawCircle(
+        Offset(x + math.sin((t + i) * math.pi * 2) * 8, y),
+        4.0 + i * 0.8,
+        Paint()..color = Colors.white.withAlpha(26),
+      );
+    }
+
+    // Floating ingredient emoji-like colour sparks.
+    for (var i = 0; i < 8; i++) {
+      final phase = (t * 0.7 + i * 0.13) % 1;
+      final x = w * 0.2 + ((i * 0.11) % 0.6) * w;
+      final y = h * 0.26 + math.sin(phase * math.pi * 2) * 10;
+      canvas.drawCircle(
+        Offset(x, y),
+        1.8,
+        Paint()..color = accent.withAlpha(90),
+      );
+    }
   }
 
   @override
-  bool shouldRepaint(covariant _PanPainter oldDelegate) =>
+  bool shouldRepaint(covariant _StovePainter oldDelegate) =>
       oldDelegate.t != t ||
       oldDelegate.progress != progress ||
-      oldDelegate.recipe != recipe;
+      oldDelegate.accent != accent ||
+      oldDelegate.ingredients != ingredients;
 }
 
 class _KitchenPainter extends CustomPainter {

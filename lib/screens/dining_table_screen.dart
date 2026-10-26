@@ -22,8 +22,8 @@ class DiningResult {
 }
 
 /// The dining table. Meals cooked in the kitchen appear here as plated
-/// dishes; sitting down consumes one, restores energy, and lets the player
-/// return to the kitchen for another.
+/// dishes; sitting down runs a timed eating scene, then restores energy and
+/// clears the plate.
 class DiningTableScreen extends ConsumerStatefulWidget {
   const DiningTableScreen({super.key});
 
@@ -32,10 +32,13 @@ class DiningTableScreen extends ConsumerStatefulWidget {
 }
 
 class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _ambient;
+  late final AnimationController _eat;
+
   String? _selectedMealId;
-  CookingRecipe? _lastAte;
+  CookedMeal? _lastAte;
+  CookedMeal? _eatingMeal;
   String? _notice;
   bool _eating = false;
   int _gained = 0;
@@ -47,19 +50,26 @@ class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
       vsync: this,
       duration: const Duration(seconds: 14),
     )..repeat();
+    _eat = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    );
   }
 
   @override
   void dispose() {
     _ambient.dispose();
+    _eat.dispose();
     super.dispose();
   }
 
-  Future<void> _eat(CookingRecipe recipe) async {
+  int _eatDurationMs(int minutes) =>
+      (1000 + minutes * 42).clamp(1800, 5000).toInt();
+
+  Future<void> _startEating(CookedMeal meal) async {
     if (_eating) return;
     final state = ref.read(gameStateProvider);
-    final before = state.player.energy;
-    if (!state.eatCookedMeal(recipe.mealId)) {
+    if (state.itemCount(meal.mealId) <= 0) {
       HapticFeedback.heavyImpact();
       setState(() {
         _notice = 'That plate has already been cleared.';
@@ -67,25 +77,44 @@ class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
       });
       return;
     }
-    final gained = state.player.energy - before;
+
+    _eat.duration = Duration(milliseconds: _eatDurationMs(meal.minutes));
     HapticFeedback.mediumImpact();
     setState(() {
       _eating = true;
-      _lastAte = recipe;
-      _gained = gained;
+      _eatingMeal = meal;
       _notice = null;
       _selectedMealId = null;
+      _gained = 0;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 950));
+
+    await _eat.forward(from: 0);
     if (!mounted) return;
-    setState(() => _eating = false);
+
+    final before = state.player.energy;
+    final success = state.eatCookedMeal(meal.mealId);
+    if (!mounted) return;
+    final gained = success ? state.player.energy - before : 0;
+    setState(() {
+      _eating = false;
+      _eatingMeal = null;
+      if (success) {
+        _lastAte = meal;
+        _gained = gained;
+        _notice = null;
+      } else {
+        _notice = 'The plate disappeared before the last bite.';
+      }
+    });
+    _eat.reset();
     HapticFeedback.lightImpact();
   }
 
   void _close() {
+    if (_eating) return;
     Navigator.of(
       context,
-    ).pop(DiningResult(ateTitle: _lastAte?.mealName, energyGained: _gained));
+    ).pop(DiningResult(ateTitle: _lastAte?.name, energyGained: _gained));
   }
 
   @override
@@ -93,158 +122,152 @@ class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
     final state = ref.watch(gameStateProvider);
     final period = state.time.period;
     final meals = state.cookedMeals;
-    final selectedId = _selectedMeal(meals);
-    final selected = selectedId == null
-        ? null
-        : CookingCatalog.byMealId(selectedId);
+    final selected = _selectedMeal(meals);
+    final shownMeal = _eatingMeal ?? selected;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF140F0B),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          AnimatedBuilder(
-            animation: _ambient,
-            builder: (context, _) => CustomPaint(
-              painter: _DiningRoomPainter(
-                t: _ambient.value,
-                period: period,
-                meal: selected,
-                eating: _eating,
+    return PopScope(
+      canPop: !_eating,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF140F0B),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            AnimatedBuilder(
+              animation: _ambient,
+              builder: (context, _) => CustomPaint(
+                painter: _DiningRoomPainter(
+                  t: _ambient.value,
+                  period: period,
+                  meal: shownMeal,
+                  eating: _eating,
+                ),
               ),
             ),
-          ),
-          SafeArea(
-            minimum: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        gradient: const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [Color(0xFFB7793E), Color(0xFF5A2E16)],
+            SafeArea(
+              minimum: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xFFB7793E), Color(0xFF5A2E16)],
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black38,
+                              blurRadius: 12,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
                         ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Colors.black38,
-                            blurRadius: 12,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
+                        child: const Icon(
+                          Icons.table_restaurant_rounded,
+                          color: Color(0xFFFFF4DF),
+                          size: 21,
+                        ),
                       ),
-                      child: const Icon(
-                        Icons.table_restaurant_rounded,
-                        color: Color(0xFFFFF4DF),
-                        size: 21,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            'THE DINING TABLE',
-                            style: TextStyle(
-                              color: Color(0xFFFFF4DF),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1.4,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'THE DINING TABLE',
+                              style: TextStyle(
+                                color: Color(0xFFFFF4DF),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.4,
+                              ),
                             ),
-                          ),
-                          Text(
-                            _periodFlavor(period),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFFD8C8B5),
-                              fontSize: 10,
+                            Text(
+                              _periodFlavor(period),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFFD8C8B5),
+                                fontSize: 10,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
+                      ),
+                      _Pill(
+                        icon: Icons.bolt_rounded,
+                        label: '${state.player.energy} energy',
+                        tint: const Color(0xFFFFD166),
+                      ),
+                      const SizedBox(width: 6),
+                      _Pill(
+                        icon: Icons.schedule_rounded,
+                        label: state.time.clockLabel,
+                        tint: const Color(0xFF9BD8FF),
+                      ),
+                      const SizedBox(width: 6),
+                      _Pill(
+                        icon: Icons.wb_twilight_rounded,
+                        label: state.time.periodLabel,
+                        tint: const Color(0xFFFFB4A2),
+                      ),
+                      const SizedBox(width: 6),
+                      _RoundButton(
+                        icon: Icons.close_rounded,
+                        label: 'Leave the table',
+                        onTap: _close,
+                      ),
+                    ],
+                  ),
+                  if (_notice != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: _Notice(text: _notice!),
+                    ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: SizedBox(
+                        width: 348,
+                        child: _tablePanel(meals, selected),
                       ),
                     ),
-                    _Pill(
-                      icon: Icons.bolt_rounded,
-                      label: '${state.player.energy} energy',
-                      tint: const Color(0xFFFFD166),
-                    ),
-                    const SizedBox(width: 6),
-                    _Pill(
-                      icon: Icons.schedule_rounded,
-                      label: state.time.clockLabel,
-                      tint: const Color(0xFF9BD8FF),
-                    ),
-                    const SizedBox(width: 6),
-                    _Pill(
-                      icon: Icons.wb_twilight_rounded,
-                      label: state.time.periodLabel,
-                      tint: const Color(0xFFFFB4A2),
-                    ),
-                    const SizedBox(width: 6),
-                    _RoundButton(
-                      icon: Icons.close_rounded,
-                      label: 'Leave the table',
-                      onTap: _close,
-                    ),
-                  ],
-                ),
-                if (_notice != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: _Notice(text: _notice!),
                   ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: SizedBox(
-                      width: 330,
-                      child: _tablePanel(state, meals, selected, period),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_eating)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: ColoredBox(
-                  color: Colors.black.withAlpha(120),
-                  child: Center(
-                    child: _EatingOverlay(recipe: _lastAte, gained: _gained),
-                  ),
-                ),
+                ],
               ),
             ),
-        ],
+            if (_eating && _eatingMeal != null)
+              Positioned.fill(
+                child: _EatingOverlay(
+                  meal: _eatingMeal!,
+                  progress: _eat,
+                  ambient: _ambient,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  String? _selectedMeal(List<CookingRecipe> meals) {
+  CookedMeal? _selectedMeal(List<CookedMeal> meals) {
     if (meals.isEmpty) return null;
-    if (_selectedMealId != null &&
-        meals.any((recipe) => recipe.mealId == _selectedMealId)) {
-      return _selectedMealId;
+    if (_selectedMealId != null) {
+      for (final meal in meals) {
+        if (meal.mealId == _selectedMealId) return meal;
+      }
     }
-    return meals.first.mealId;
+    return meals.first;
   }
 
-  Widget _tablePanel(
-    GameState state,
-    List<CookingRecipe> meals,
-    CookingRecipe? selected,
-    DayPeriod period,
-  ) {
+  Widget _tablePanel(List<CookedMeal> meals, CookedMeal? selected) {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
@@ -291,7 +314,7 @@ class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
           const SizedBox(height: 4),
           if (_lastAte != null && !_eating)
             _AteBanner(
-              recipe: _lastAte!,
+              meal: _lastAte!,
               gained: _gained,
               onKitchen: () => Navigator.of(
                 context,
@@ -312,13 +335,13 @@ class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
                 itemCount: meals.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 5),
                 itemBuilder: (context, index) {
-                  final recipe = meals[index];
+                  final meal = meals[index];
                   return _MealOption(
-                    recipe: recipe,
-                    selected: selected?.mealId == recipe.mealId,
+                    meal: meal,
+                    selected: selected?.mealId == meal.mealId,
                     onTap: () {
                       HapticFeedback.selectionClick();
-                      setState(() => _selectedMealId = recipe.mealId);
+                      setState(() => _selectedMealId = meal.mealId);
                     },
                   );
                 },
@@ -330,7 +353,7 @@ class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
               child: FilledButton.icon(
                 onPressed: selected == null || _eating
                     ? null
-                    : () => _eat(selected),
+                    : () => _startEating(selected),
                 style: FilledButton.styleFrom(
                   backgroundColor:
                       selected?.accentDeep ?? const Color(0xFF6B4A2A),
@@ -345,7 +368,7 @@ class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
                 label: Text(
                   selected == null
                       ? 'Nothing selected'
-                      : 'Sit down & eat  ·  +${selected.eatEnergy} energy',
+                      : 'Sit down & eat  ·  +${selected.energy} energy',
                   style: const TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w800,
@@ -355,7 +378,7 @@ class _DiningTableScreenState extends ConsumerState<DiningTableScreen>
             ),
             const SizedBox(height: 3),
             Text(
-              'Eating takes ${selected?.eatMinutes ?? 30} minutes. '
+              'Eating takes ${selected?.minutes ?? 30} in-game minutes. '
               'The remaining plates stay on the table.',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Color(0xFFAE9C85), fontSize: 8),
@@ -507,8 +530,8 @@ class _EmptyTable extends StatelessWidget {
             ),
             const SizedBox(height: 3),
             const Text(
-              'The pantry is stocked. Cook breakfast, lunch, or dinner in '
-              'the kitchen and the plate will appear here.',
+              'Cook a family recipe or build a custom plate in the kitchen. '
+              'Whatever comes off the stove appears here.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Color(0xFFC4B39F),
@@ -542,12 +565,12 @@ class _EmptyTable extends StatelessWidget {
 
 class _MealOption extends StatelessWidget {
   const _MealOption({
-    required this.recipe,
+    required this.meal,
     required this.selected,
     required this.onTap,
   });
 
-  final CookingRecipe recipe;
+  final CookedMeal meal;
   final bool selected;
   final VoidCallback onTap;
 
@@ -562,37 +585,69 @@ class _MealOption extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
           decoration: BoxDecoration(
             color: selected
-                ? recipe.accentDeep.withAlpha(115)
+                ? meal.accentDeep.withAlpha(115)
                 : const Color(0xFF2B2118).withAlpha(190),
             borderRadius: BorderRadius.circular(11),
             border: Border.all(
               color: selected
-                  ? recipe.accent.withAlpha(180)
+                  ? meal.accent.withAlpha(180)
                   : Colors.white.withAlpha(12),
               width: selected ? 1.4 : 1,
             ),
           ),
           child: Row(
             children: [
-              Text(recipe.emoji, style: const TextStyle(fontSize: 20)),
+              Text(meal.emoji, style: const TextStyle(fontSize: 20)),
               const SizedBox(width: 7),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      recipe.mealName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFFFF4DF),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            meal.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFFFFF4DF),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (meal.isCustom) ...[
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: meal.accent.withAlpha(32),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: meal.accent.withAlpha(90),
+                              ),
+                            ),
+                            child: Text(
+                              'CUSTOM',
+                              style: TextStyle(
+                                color: meal.accent,
+                                fontSize: 6.8,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     Text(
-                      '${recipe.subtitle}  ·  +${recipe.eatEnergy} energy',
+                      '${meal.subtitle}  ·  +${meal.energy} energy  ·  '
+                      '${meal.minutes}m',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -604,11 +659,7 @@ class _MealOption extends StatelessWidget {
                 ),
               ),
               if (selected)
-                Icon(
-                  Icons.check_circle_rounded,
-                  size: 16,
-                  color: recipe.accent,
-                ),
+                Icon(Icons.check_circle_rounded, size: 16, color: meal.accent),
             ],
           ),
         ),
@@ -619,12 +670,12 @@ class _MealOption extends StatelessWidget {
 
 class _AteBanner extends StatelessWidget {
   const _AteBanner({
-    required this.recipe,
+    required this.meal,
     required this.gained,
     required this.onKitchen,
   });
 
-  final CookingRecipe recipe;
+  final CookedMeal meal;
   final int gained;
   final VoidCallback onKitchen;
 
@@ -648,7 +699,7 @@ class _AteBanner extends StatelessWidget {
           const SizedBox(width: 5),
           Expanded(
             child: Text(
-              '${recipe.mealName} eaten  ·  +$gained energy',
+              '${meal.name} eaten  ·  +$gained energy  ·  ${meal.minutes} min',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -675,47 +726,371 @@ class _AteBanner extends StatelessWidget {
 }
 
 class _EatingOverlay extends StatelessWidget {
-  const _EatingOverlay({required this.recipe, required this.gained});
+  const _EatingOverlay({
+    required this.meal,
+    required this.progress,
+    required this.ambient,
+  });
 
-  final CookingRecipe? recipe;
-  final int gained;
+  final CookedMeal meal;
+  final Animation<double> progress;
+  final Animation<double> ambient;
+
+  String _stage(double value) {
+    if (value < 0.14) return 'Sitting down and unfolding the napkin…';
+    if (value < 0.34) return 'The first warm bite.';
+    if (value < 0.64) return 'Savour the middle of the plate…';
+    if (value < 0.9) return 'Sopping up the last little bit.';
+    return 'Finished. Push the plate back.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: const Color(0xFF0D0906).withAlpha(244),
+      child: SafeArea(
+        minimum: const EdgeInsets.all(18),
+        child: AnimatedBuilder(
+          animation: Listenable.merge([progress, ambient]),
+          builder: (context, _) {
+            final value = progress.value;
+            final minutesLeft = math.max(
+              0,
+              (meal.minutes * (1 - value)).ceil(),
+            );
+            final sceneHeight = (MediaQuery.sizeOf(context).height * 0.36)
+                .clamp(130.0, 210.0);
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: sceneHeight,
+                        width: double.infinity,
+                        child: CustomPaint(
+                          painter: _MealPlatePainter(
+                            t: ambient.value,
+                            progress: value,
+                            meal: meal,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Eating ${meal.name}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFFFF4DF),
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _stage(value),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFD8C8B5),
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 6,
+                        runSpacing: 5,
+                        children: [
+                          _OverlayChip(
+                            icon: Icons.timer_outlined,
+                            label: '$minutesLeft min left',
+                            tint: const Color(0xFFFFA36C),
+                          ),
+                          _OverlayChip(
+                            icon: Icons.restaurant_rounded,
+                            label: '${meal.minutes}-minute meal',
+                            tint: const Color(0xFFFFD166),
+                          ),
+                          _OverlayChip(
+                            icon: Icons.bolt_rounded,
+                            label: '+${meal.energy} energy at the end',
+                            tint: const Color(0xFF9ED9BD),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        meal.ingredientSummary,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFBCA98F),
+                          fontSize: 9.5,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          value: value,
+                          minHeight: 8,
+                          backgroundColor: Colors.white10,
+                          valueColor: AlwaysStoppedAnimation(meal.accent),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Take your time. The house can wait.',
+                        style: const TextStyle(
+                          color: Color(0xFFAE9C85),
+                          fontSize: 8.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _OverlayChip extends StatelessWidget {
+  const _OverlayChip({
+    required this.icon,
+    required this.label,
+    required this.tint,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tint;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 280,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFF241A13),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: (recipe?.accent ?? const Color(0xFFFFD166)).withAlpha(140),
-        ),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 30)],
+        color: tint.withAlpha(20),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tint.withAlpha(75)),
       ),
-      child: Column(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(recipe?.emoji ?? '🍽️', style: const TextStyle(fontSize: 32)),
-          const SizedBox(height: 6),
+          Icon(icon, size: 12, color: tint),
+          const SizedBox(width: 4),
           Text(
-            'A warm, quiet meal.',
-            style: const TextStyle(
-              color: Color(0xFFFFF4DF),
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
+            label,
+            style: TextStyle(
+              color: tint,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'Energy +$gained  ·  the table feels a little lighter.',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Color(0xFFC8B8A5), fontSize: 9.5),
           ),
         ],
       ),
     );
   }
+}
+
+/// Close-up of the plate while it is being eaten. The food shrinks bite by
+/// bite, the fork travels in and out, and steam fades as the plate empties.
+class _MealPlatePainter extends CustomPainter {
+  _MealPlatePainter({
+    required this.t,
+    required this.progress,
+    required this.meal,
+  });
+
+  final double t;
+  final double progress;
+  final CookedMeal meal;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // Warm room glow.
+    final glow = Offset(w / 2, h * 0.4);
+    canvas.drawCircle(
+      glow,
+      h * 0.55,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [const Color(0xFFFFC857).withAlpha(24), Colors.transparent],
+        ).createShader(Rect.fromCircle(center: glow, radius: h * 0.55)),
+    );
+
+    // Table and placemat.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(w * 0.06, h * 0.58, w * 0.88, h * 0.36),
+        const Radius.circular(16),
+      ),
+      Paint()..color = const Color(0xFF3A2417),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(w * 0.5, h * 0.77),
+          width: w * 0.58,
+          height: h * 0.34,
+        ),
+        const Radius.circular(10),
+      ),
+      Paint()..color = const Color(0xFF6B2E2E).withAlpha(205),
+    );
+
+    // Plate.
+    final plateCenter = Offset(w * 0.5, h * 0.72);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: plateCenter + Offset(0, 6),
+        width: w * 0.42,
+        height: h * 0.24,
+      ),
+      Paint()..color = Colors.black.withAlpha(70),
+    );
+    canvas.drawOval(
+      Rect.fromCenter(center: plateCenter, width: w * 0.42, height: h * 0.24),
+      Paint()..color = const Color(0xFFF2E4C9),
+    );
+    canvas.drawOval(
+      Rect.fromCenter(center: plateCenter, width: w * 0.33, height: h * 0.18),
+      Paint()..color = const Color(0xFFE3D0AE),
+    );
+
+    // Food shrinks with every bite.
+    final left = (1 - progress * 0.92).clamp(0.04, 1.0);
+    if (left > 0.08) {
+      final foodWidth = w * 0.25 * left;
+      final foodHeight = h * 0.11 * left;
+      final foodCenter = plateCenter + Offset(0, -h * 0.01);
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: foodCenter,
+          width: foodWidth,
+          height: foodHeight,
+        ),
+        Paint()..color = meal.accentDeep,
+      );
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: foodCenter + Offset(0, -h * 0.008),
+          width: foodWidth * 0.84,
+          height: foodHeight * 0.68,
+        ),
+        Paint()..color = meal.accent,
+      );
+      var i = 0;
+      for (final entry in meal.ingredients.entries) {
+        final ingredient = PantryCatalog.byId(entry.key);
+        if (ingredient == null) continue;
+        final a = i * math.pi * 0.7 + 0.4;
+        canvas.drawCircle(
+          foodCenter +
+              Offset(
+                math.cos(a) * foodWidth * 0.24,
+                math.sin(a) * foodHeight * 0.2,
+              ),
+          2.4 + (i % 2),
+          Paint()..color = ingredient.color,
+        );
+        i++;
+      }
+    } else {
+      // Crumbs left behind.
+      final crumb = Paint()..color = const Color(0xFFB08B5A);
+      for (var i = 0; i < 5; i++) {
+        canvas.drawCircle(
+          plateCenter +
+              Offset(
+                math.cos(i * 1.7) * w * 0.08,
+                math.sin(i * 1.3) * h * 0.03,
+              ),
+          1.5,
+          crumb,
+        );
+      }
+    }
+
+    // Steam while there is still food.
+    if (progress < 0.82) {
+      for (var i = 0; i < 3; i++) {
+        final phase = (t + i * 0.22) % 1;
+        final x = w * 0.42 + i * w * 0.07;
+        final y = h * 0.48 - phase * h * 0.22;
+        canvas.drawCircle(
+          Offset(x + math.sin((t + i) * math.pi * 3) * 5, y),
+          3.5 + i,
+          Paint()..color = Colors.white.withAlpha(30),
+        );
+      }
+    }
+
+    // Fork and knife, with the fork dipping toward the plate.
+    final travel = math.sin(progress * math.pi * 6).abs();
+    final forkX = w * 0.73 - travel * w * 0.09;
+    final forkY = h * 0.69 + travel * h * 0.05;
+    final cutlery = Paint()
+      ..color = const Color(0xFFD7D2C6)
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      Offset(forkX, forkY - h * 0.06),
+      Offset(forkX, forkY + h * 0.08),
+      cutlery,
+    );
+    for (var i = -1; i <= 1; i++) {
+      canvas.drawLine(
+        Offset(forkX + i * 3, forkY - h * 0.11),
+        Offset(forkX + i * 3, forkY - h * 0.055),
+        cutlery,
+      );
+    }
+    canvas.drawLine(
+      Offset(w * 0.27, forkY - h * 0.09),
+      Offset(w * 0.27, forkY + h * 0.07),
+      cutlery,
+    );
+
+    // Water glass.
+    final glass = RRect.fromRectAndRadius(
+      Rect.fromLTWH(w * 0.82, h * 0.52, w * 0.055, h * 0.16),
+      const Radius.circular(6),
+    );
+    canvas.drawRRect(glass, Paint()..color = const Color(0xFF9CC7DA));
+    canvas.drawRRect(
+      glass.deflate(4),
+      Paint()..color = const Color(0xFFD7EEF6).withAlpha(170),
+    );
+
+    // Side napkin.
+    final napkin = Path()
+      ..moveTo(w * 0.13, h * 0.59)
+      ..lineTo(w * 0.22, h * 0.57)
+      ..lineTo(w * 0.24, h * 0.78)
+      ..lineTo(w * 0.15, h * 0.8)
+      ..close();
+    canvas.drawPath(napkin, Paint()..color = const Color(0xFFE8D1AE));
+  }
+
+  @override
+  bool shouldRepaint(covariant _MealPlatePainter oldDelegate) =>
+      oldDelegate.t != t ||
+      oldDelegate.progress != progress ||
+      oldDelegate.meal != meal;
 }
 
 class _DiningRoomPainter extends CustomPainter {
@@ -728,7 +1103,7 @@ class _DiningRoomPainter extends CustomPainter {
 
   final double t;
   final DayPeriod period;
-  final CookingRecipe? meal;
+  final CookedMeal? meal;
   final bool eating;
 
   @override
@@ -909,9 +1284,9 @@ class _DiningRoomPainter extends CustomPainter {
       ),
       Paint()..color = const Color(0xFFE3D0AE),
     );
-    if (meal != null) {
+    if (meal != null && !eating) {
       _food(canvas, plateCenter, plateR, meal!);
-      if (!eating) _steam(canvas, plateCenter, plateR);
+      _steam(canvas, plateCenter, plateR);
     }
     // Candle for evening/night.
     if (evening || night) {
@@ -973,8 +1348,8 @@ class _DiningRoomPainter extends CustomPainter {
     );
   }
 
-  void _food(Canvas canvas, Offset center, double r, CookingRecipe recipe) {
-    if (recipe.id == 'breakfast') {
+  void _food(Canvas canvas, Offset center, double r, CookedMeal meal) {
+    if (meal.mealId == 'meal_breakfast') {
       // Two eggs and toast.
       for (final dx in [-r * 0.28, r * 0.22]) {
         canvas.drawOval(
@@ -1007,7 +1382,7 @@ class _DiningRoomPainter extends CustomPainter {
         ),
         Paint()..color = const Color(0xFFBFD7EA),
       );
-    } else if (recipe.id == 'lunch') {
+    } else if (meal.mealId == 'meal_lunch') {
       canvas.drawOval(
         Rect.fromCenter(center: center, width: r * 1.4, height: r * 0.8),
         Paint()..color = const Color(0xFFF4E6C8),
@@ -1035,7 +1410,7 @@ class _DiningRoomPainter extends CustomPainter {
         r * 0.08,
         Paint()..color = const Color(0xFFB07A4A),
       );
-    } else {
+    } else if (meal.mealId == 'meal_dinner') {
       canvas.drawOval(
         Rect.fromCenter(center: center, width: r * 1.45, height: r * 0.82),
         Paint()..color = const Color(0xFF5A3520),
@@ -1076,6 +1451,32 @@ class _DiningRoomPainter extends CustomPainter {
         r * 0.07,
         Paint()..color = const Color(0xFFF2C94C),
       );
+    } else {
+      // Custom plate: a colourful mound with one dot per ingredient.
+      canvas.drawOval(
+        Rect.fromCenter(center: center, width: r * 1.3, height: r * 0.78),
+        Paint()..color = meal.accentDeep,
+      );
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: center + Offset(0, r * 0.01),
+          width: r * 1.08,
+          height: r * 0.58,
+        ),
+        Paint()..color = meal.accent,
+      );
+      var i = 0;
+      for (final entry in meal.ingredients.entries) {
+        final ingredient = PantryCatalog.byId(entry.key);
+        if (ingredient == null) continue;
+        final a = i * math.pi * 0.73 + 0.3;
+        canvas.drawCircle(
+          center + Offset(math.cos(a) * r * 0.32, math.sin(a) * r * 0.16),
+          r * 0.07,
+          Paint()..color = ingredient.color,
+        );
+        i++;
+      }
     }
   }
 
@@ -1115,7 +1516,7 @@ class _DiningRoomPainter extends CustomPainter {
               ? const [Color(0xFF0A1230), Color(0xFF1E2E58), Color(0xFF3A4168)]
               : evening
               ? const [Color(0xFF5A3659), Color(0xFFFF8C5A), Color(0xFFFFD08A)]
-              : const [Color(0xFF8DD3E8), Color(0xFFC5EAF5), Color(0xFFF7F2DC)],
+              : const [Color(0xFF7EC8E3), Color(0xFFBDE6F5), Color(0xFFF3F0D7)],
         ).createShader(glass),
     );
     // Rooftops.

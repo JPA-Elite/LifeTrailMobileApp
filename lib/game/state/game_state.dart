@@ -6,6 +6,7 @@ import '../../models/npc_model.dart';
 import '../../models/quest_model.dart';
 import '../../models/item_model.dart';
 import '../../models/cooking.dart';
+import '../../services/game_data_service.dart';
 import '../systems/core_systems.dart';
 import 'game_snapshot.dart';
 
@@ -45,6 +46,10 @@ class GameState extends ChangeNotifier {
     this.weather = weather;
     this.chapter = chapter;
     _loaded = true;
+    // Custom plates encode their stats in the inventory item id. Re-register
+    // those item definitions after loading so the table and inventory can
+    // show their real names and effects.
+    _registerCustomMealItems();
     _checkQuestUnlocks();
     notifyListeners();
   }
@@ -372,25 +377,67 @@ class GameState extends ChangeNotifier {
     return true;
   }
 
+  /// Cooks a player-designed plate. The ingredient check and stock removal
+  /// happen atomically, then the variable stove time and energy cost are
+  /// applied. Returns null when the pantry or the player is short.
+  CustomCookPlan? cookCustomMeal(CustomCookPlan plan) {
+    if (!canCookCustom(plan)) return null;
+    _removeStacksSilently(plan.ingredients);
+    _addStacksSilently({plan.mealId: 1});
+    GameDataService().items[plan.mealId] = plan.toItem();
+    player = player.copyWith(
+      energy: player.energy - plan.cookEnergyCost,
+      happiness: player.happiness + 1,
+    );
+    advanceMinutes(plan.cookMinutes);
+    _checkQuestUnlocks();
+    notifyListeners();
+    return plan;
+  }
+
+  bool canCookCustom(CustomCookPlan plan) {
+    if (plan.isEmpty) return false;
+    if (player.energy < plan.cookEnergyCost) return false;
+    return hasItems(plan.ingredients);
+  }
+
   /// Eats a plated meal at the dining table. Returns false if the meal is
   /// not in the kitchen/table inventory.
   bool eatCookedMeal(String mealId) {
-    final recipe = CookingCatalog.byMealId(mealId);
-    if (recipe == null) return false;
+    final meal = CookingCatalog.servingFor(mealId);
+    if (meal == null) return false;
     if (!removeItem(mealId, 1)) return false;
-    advanceMinutes(recipe.eatMinutes);
+    advanceMinutes(meal.minutes);
     player = player.copyWith(
-      energy: player.energy + recipe.eatEnergy,
-      happiness: player.happiness + recipe.eatHappiness,
+      energy: player.energy + meal.energy,
+      happiness: player.happiness + meal.happiness,
     );
     _checkQuestUnlocks();
     notifyListeners();
     return true;
   }
 
-  List<CookingRecipe> get cookedMeals => CookingCatalog.recipes
-      .where((recipe) => itemCount(recipe.mealId) > 0)
-      .toList();
+  List<CookedMeal> get cookedMeals {
+    final meals = <CookedMeal>[
+      for (final recipe in CookingCatalog.recipes)
+        if (itemCount(recipe.mealId) > 0) recipe.toMeal(),
+    ];
+    for (final stack in inventory) {
+      if (!CookingCatalog.isCustomMealId(stack.itemId)) continue;
+      final meal = CookingCatalog.servingFor(stack.itemId);
+      if (meal != null) meals.add(meal);
+    }
+    return meals;
+  }
+
+  void _registerCustomMealItems() {
+    for (final stack in inventory) {
+      if (!CookingCatalog.isCustomMealId(stack.itemId)) continue;
+      final plan = CookingCatalog.customMealFromId(stack.itemId);
+      if (plan == null) continue;
+      GameDataService().items[plan.mealId] = plan.toItem();
+    }
+  }
 
   void _addStacksSilently(Map<String, int> stacks) {
     stacks.forEach((itemId, count) {
