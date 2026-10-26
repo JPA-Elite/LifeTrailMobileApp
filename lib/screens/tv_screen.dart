@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../game/state/game_state.dart';
 import '../game/systems/core_systems.dart';
 import '../models/tv_show.dart';
+import 'retro_browser.dart';
 
 /// Returned when the player turns the television off.
 class TvResult {
@@ -14,12 +15,14 @@ class TvResult {
     this.sessions = 0,
     this.energySpent = 0,
     this.minutes = 0,
+    this.pagesVisited = 0,
     this.lastChannel,
   });
 
   final int sessions;
   final int energySpent;
   final int minutes;
+  final int pagesVisited;
   final TvChannel? lastChannel;
 
   bool get watched => sessions > 0;
@@ -46,6 +49,7 @@ class _TvScreenState extends ConsumerState<TvScreen>
   int _sessions = 0;
   int _energySpent = 0;
   int _minutes = 0;
+  int _pagesVisited = 0;
 
   @override
   void initState() {
@@ -87,6 +91,7 @@ class _TvScreenState extends ConsumerState<TvScreen>
       _sessions += 1;
       _energySpent += spent;
       _minutes += cfg.minutes;
+      if (channel.visual == TvVisual.internet) _pagesVisited = 0;
       _notice = null;
     });
   }
@@ -102,6 +107,7 @@ class _TvScreenState extends ConsumerState<TvScreen>
         sessions: _sessions,
         energySpent: _energySpent,
         minutes: _minutes,
+        pagesVisited: _pagesVisited,
         lastChannel: _lastChannel,
       ),
     );
@@ -138,12 +144,23 @@ class _TvScreenState extends ConsumerState<TvScreen>
               );
             },
           ),
-          SafeArea(
-            minimum: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-            child: channel == null
-                ? _buildPicker(state)
-                : _buildNowWatching(state, channel),
-          ),
+          if (channel == null || channel.visual != TvVisual.internet)
+            SafeArea(
+              minimum: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              child: channel == null
+                  ? _buildPicker(state)
+                  : _buildNowWatching(state, channel),
+            ),
+          if (channel != null && channel.visual == TvVisual.internet)
+            Positioned.fill(
+              child: RetroBrowser(
+                onExit: _stopWatching,
+                onPagesVisited: (pages) {
+                  if (pages == _pagesVisited) return;
+                  setState(() => _pagesVisited = pages);
+                },
+              ),
+            ),
         ],
       ),
     );

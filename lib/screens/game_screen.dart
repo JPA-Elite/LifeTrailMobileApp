@@ -569,10 +569,14 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     ).then((result) {
       if (!mounted || result == null || !result.watched) return;
       final title = result.lastChannel?.title ?? 'television';
+      final browsed = result.pagesVisited > 0
+          ? ', ${result.pagesVisited} '
+                '${result.pagesVisited == 1 ? 'page' : 'pages'} browsed'
+          : '';
       _flashMessage(
         'You turn off $title. Energy -${result.energySpent}, '
         '+${result.minutes} min across ${result.sessions} '
-        '${result.sessions == 1 ? 'visit' : 'visits'}.',
+        '${result.sessions == 1 ? 'visit' : 'visits'}$browsed.',
         seconds: 5,
       );
     });

@@ -14,6 +14,7 @@ import 'package:lifetrail/models/game_time.dart';
 import 'package:lifetrail/models/tv_show.dart';
 import 'package:lifetrail/screens/cooking_screen.dart';
 import 'package:lifetrail/screens/dining_table_screen.dart';
+import 'package:lifetrail/screens/retro_browser.dart';
 import 'package:lifetrail/screens/tv_screen.dart';
 import 'package:lifetrail/screens/window_view_screen.dart';
 
@@ -138,6 +139,39 @@ void main() {
       expect(state.time.minutes, 7 * 60 + 120);
       expect(find.text('Neon Harbor'), findsWidgets);
       expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
+    });
+
+    testWidgets('internet channel opens the cursor browser and charges once', (
+      tester,
+    ) async {
+      await _setPhoneLandscape(tester);
+      final state = GameState();
+      await tester.pumpWidget(_scene(state, const TvScreen()));
+      await tester.pump();
+
+      await tester.tap(find.text('Browse the Internet'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+
+      expect(state.player.energy, 76);
+      expect(state.time.minutes, 7 * 60 + 60);
+      expect(find.byType(RetroBrowser), findsOneWidget);
+      expect(find.text('The small web, hand-indexed.'), findsOneWidget);
+      expect(find.byKey(const ValueKey('retroweb_cursor')), findsOneWidget);
+
+      // Browsing pages is free inside the already-paid TV visit.
+      await tester.tap(find.text('The Harbor Herald'));
+      await tester.pump();
+      expect(
+        find.text('Ferry strike ends with a handshake and free coffee'),
+        findsOneWidget,
+      );
+      expect(state.player.energy, 76);
+      expect(state.time.minutes, 7 * 60 + 60);
+
+      await tester.tap(find.byIcon(Icons.power_settings_new_rounded));
+      await tester.pump();
+      expect(find.text('LIFETRAIL TV'), findsOneWidget);
     });
   });
 

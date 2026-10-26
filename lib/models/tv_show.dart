@@ -53,7 +53,8 @@ class TvCatalog {
       id: 'internet',
       title: 'Browse the Internet',
       program: 'RetroWeb',
-      description: 'Forums, recipes, a quiz, and one very important cat video.',
+      description:
+          '100 handmade sites, a movable cursor, quizzes, shops, and radio.',
       activityId: 'tv_internet',
       visual: TvVisual.internet,
       emoji: '🌐',
