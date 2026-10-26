@@ -170,16 +170,14 @@ class VehicleComponent extends PositionComponent {
       canvas.scale(-1, 1);
     }
     if (kind == VehicleKind.car) {
-      _renderCar(canvas);
+      _renderCar(canvas, size.x, size.y);
     } else {
-      _renderBicycle(canvas);
+      _renderBicycle(canvas, size.x, size.y);
     }
     canvas.restore();
   }
 
-  void _renderCar(Canvas canvas) {
-    final w = size.x;
-    final h = size.y;
+  void _renderCar(Canvas canvas, double w, double h) {
     // Wheels.
     final wheel = Paint()..color = const Color(0xFF1F1A17);
     for (final wx in [w * 0.22, w * 0.78]) {
@@ -222,9 +220,7 @@ class VehicleComponent extends PositionComponent {
     canvas.drawCircle(Offset(4, h - 10), 3.5, tail);
   }
 
-  void _renderBicycle(Canvas canvas) {
-    final w = size.x;
-    final h = size.y;
+  void _renderBicycle(Canvas canvas, double w, double h) {
     final cy = h / 2;
     final wheel = Paint()
       ..style = PaintingStyle.stroke
@@ -255,6 +251,116 @@ class VehicleComponent extends PositionComponent {
         ..strokeCap = StrokeCap.round
         ..color = const Color(0xFF4A86E8),
     );
+  }
+}
+
+/// A car or bicycle cruising one of the north-south streets.
+///
+/// Vertical traffic is deliberately sparse next to the highway fleet, and
+/// it yields at every crossing it reaches: it waits for a red highway
+/// signal where there is one, and otherwise only pulls through when the
+/// junction is clear of highway traffic.
+class CrossStreetVehicle extends VehicleComponent {
+  /// Left edge of the north-south street this vehicle drives on.
+  final double streetLeft;
+
+  /// Whether junction [junction] is currently unsafe to enter.
+  final bool Function(int junction)? junctionBlocked;
+
+  /// Distance to the player when they stand in this lane ahead, or null
+  /// when the lane is clear. Vertical traffic halts for them just like the
+  /// highway cars do.
+  final double? Function(CrossStreetVehicle self)? playerAhead;
+
+  CrossStreetVehicle({
+    required super.host,
+    required super.kind,
+    required this.streetLeft,
+    required super.dir,
+    required super.spawn,
+    required super.cruiseSpeed,
+    required super.color,
+    this.junctionBlocked,
+    this.playerAhead,
+    // Highway fields are unused on a vertical vehicle, but the shared
+    // kind/speed/collision plumbing lives on the base class.
+  }) : super(highwayTop: -1, junction: 0) {
+    size = kind == VehicleKind.car
+        ? Vector2(52, 120)
+        : Vector2(22, 76);
+  }
+
+  @override
+  double get halfLen => size.y / 2;
+
+  @override
+  void update(double dt) {
+    var target = cruiseSpeed;
+    double? cap;
+
+    final frontY = position.y + dir * halfLen;
+
+    // Nearest crossing ahead: stop at its line while it is not safe.
+    int? junction;
+    double? stopDistance;
+    for (var j = 0; j < kHighwayTops.length; j++) {
+      final top = kHighwayTops[j];
+      final lineY = dir > 0 ? top - 46 : top + kHighwayHeight + 46;
+      final distance = (lineY - frontY) * dir;
+      if (distance > -12 &&
+          distance < 320 &&
+          (stopDistance == null || distance < stopDistance)) {
+        stopDistance = distance;
+        junction = j;
+      }
+    }
+    if (junction != null && (junctionBlocked?.call(junction) ?? false)) {
+      target = 0;
+      cap = stopDistance! - 6;
+    }
+
+    final personDistance = playerAhead?.call(this);
+    if (personDistance != null) {
+      target = 0;
+      final holdAt = personDistance - 24;
+      if (cap == null || holdAt < cap) cap = holdAt;
+    }
+
+    if (target < speed) {
+      speed = max(0.0, speed - _brake * dt);
+    } else {
+      speed = min(target, speed + _accel * dt);
+    }
+    var step = dir * speed * dt;
+    if (cap != null && step * dir > cap) {
+      step = dir * max(0.0, cap);
+      if (cap <= 0) speed = 0;
+    }
+    position.y += step;
+
+    // Wrap around the top and bottom edges.
+    if (dir > 0 && position.y - halfLen > kWorldHeight + 80) {
+      position.y = -halfLen - 80;
+    } else if (dir < 0 && position.y + halfLen < -80) {
+      position.y = kWorldHeight + halfLen + 80;
+    }
+  }
+
+  @override
+  void render(Canvas canvas) {
+    final length = kind == VehicleKind.car ? 120.0 : 76.0;
+    final width = kind == VehicleKind.car ? 52.0 : 22.0;
+    canvas.save();
+    canvas.translate(size.x / 2, size.y / 2);
+    // Local +x maps onto the direction of travel.
+    canvas.rotate(dir > 0 ? pi / 2 : -pi / 2);
+    canvas.translate(-length / 2, -width / 2);
+    if (kind == VehicleKind.car) {
+      _renderCar(canvas, length, width);
+    } else {
+      _renderBicycle(canvas, length, width);
+    }
+    canvas.restore();
   }
 }
 

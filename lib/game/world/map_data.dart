@@ -26,15 +26,11 @@ bool isOnAsphalt(double y) => kHighwayTops.any(
   (t) => y >= t && y <= t + kHighwayHeight,
 );
 
-/// True when [x] sits on the vertical cross-street asphalt.
-bool isOnCrossStreet(double x, {double margin = 0}) =>
-    x >= kCrossStreetLeft - margin && x <= kCrossStreetRight + margin;
-
 /// True when the point is on any road asphalt: horizontal highways or
-/// the vertical crossing street. This is what must stay clear so props
-/// never sit centered on a junction and block the way.
+/// either vertical street. This is what must stay clear so props never
+/// sit centered on a junction and block the way.
 bool isOnAnyAsphalt(double x, double y) =>
-    isOnAsphalt(y) || isOnCrossStreet(x);
+    isOnAsphalt(y) || isOnVerticalStreet(x);
 
 /// True when [y] is on highway asphalt or its sidewalks (with a small
 /// safety margin so tall props like lamp glows / tree canopies never
@@ -50,6 +46,22 @@ const double kCrossStreetLeft = 2780;
 const double kCrossStreetWidth = 200;
 const double kCrossStreetRight = kCrossStreetLeft + kCrossStreetWidth;
 
+/// A second north-south street on the west side of town, running beside
+/// the west column of lots.
+const double kWestStreetLeft = 560;
+
+/// Pavement strips flanking every north-south street.
+const double kVerticalSidewalkWidth = 30;
+
+/// Left edges of every north-south street, west to east.
+const List<double> kVerticalStreetLefts = [kWestStreetLeft, kCrossStreetLeft];
+
+/// True when [x] sits on one of the north-south streets' asphalt.
+bool isOnVerticalStreet(double x, {double margin = 0}) =>
+    kVerticalStreetLefts.any(
+      (l) => x >= l - margin && x <= l + kCrossStreetWidth + margin,
+    );
+
 // --- Traffic lanes ----------------------------------------------------------
 
 /// Each highway carries two lanes: eastbound (+1) on the north half,
@@ -60,6 +72,11 @@ double laneCenterY(double highwayTop, int dir) =>
 /// X of the stop line a [dir] vehicle must halt behind at the junction.
 double stopLineX(int dir) =>
     dir > 0 ? kCrossStreetLeft - 46 : kCrossStreetRight + 46;
+
+/// X of the lane centre for a north-south street travelling in [dir]
+/// (+1 southbound, -1 northbound).
+double crossLaneCenterX(double streetLeft, int dir) =>
+    dir > 0 ? streetLeft + 150 : streetLeft + 50;
 
 // --- Streets --------------------------------------------------------------
 
@@ -79,16 +96,34 @@ class TownStrip {
   });
 }
 
-/// Asphalt + sidewalks, drawn under everything else. The cross street is
-/// drawn first so every highway stays continuous over the junctions.
+/// Asphalt + sidewalks, drawn under everything else. The vertical streets
+/// are drawn first so every highway stays continuous over the junctions.
 List<TownStrip> buildTownRoads() => [
-  const TownStrip(
-    x: kCrossStreetLeft,
-    y: 0,
-    w: kCrossStreetWidth,
-    h: kWorldHeight,
-    color: 0xFF555555,
-  ),
+  // Pavement flanking both north-south streets.
+  for (final left in kVerticalStreetLefts) ...[
+    TownStrip(
+      x: left - kVerticalSidewalkWidth,
+      y: 0,
+      w: kVerticalSidewalkWidth,
+      h: kWorldHeight,
+      color: 0xFFC9C4B8,
+    ),
+    TownStrip(
+      x: left + kCrossStreetWidth,
+      y: 0,
+      w: kVerticalSidewalkWidth,
+      h: kWorldHeight,
+      color: 0xFFC9C4B8,
+    ),
+  ],
+  for (final left in kVerticalStreetLefts)
+    TownStrip(
+      x: left,
+      y: 0,
+      w: kCrossStreetWidth,
+      h: kWorldHeight,
+      color: 0xFF555555,
+    ),
   for (final top in kHighwayTops) ...[
     TownStrip(
       x: 0,
@@ -247,7 +282,7 @@ List<LocationModel> buildTownLocations() => [
   const LocationModel(
     id: 'bank',
     name: 'Bank',
-    x: 780,
+    x: 800,
     y: 1870,
     w: 460,
     h: 300,
@@ -275,7 +310,7 @@ List<LocationModel> buildTownLocations() => [
   const LocationModel(
     id: 'computer',
     name: 'Computer Center',
-    x: 120,
+    x: 60,
     y: 2470,
     w: 440,
     h: 300,
@@ -285,7 +320,7 @@ List<LocationModel> buildTownLocations() => [
   const LocationModel(
     id: 'amusement',
     name: 'Amusement Park',
-    x: 700,
+    x: 800,
     y: 2470,
     w: 560,
     h: 300,
@@ -353,7 +388,10 @@ List<TownDecoration> buildTownDecorations() {
     final bottom = top + kHighwayHeight;
     // Street trees on the verges either side of the highway.
     for (var x = 240.0; x < kWorldWidth - 140; x += 280) {
-      if (x > kCrossStreetLeft - 140 && x < kCrossStreetRight + 140) continue;
+      if (isOnVerticalStreet(x, margin: 140) ||
+          isOnVerticalStreet(x + 150, margin: 140)) {
+        continue;
+      }
       if (clearOfDoors(x)) {
         out.add(TownDecoration('tree', x, top - kSidewalkHeight - 12, 132));
         out.add(TownDecoration('tree', x + 150, bottom + kSidewalkHeight + 12, 132));
@@ -363,24 +401,23 @@ List<TownDecoration> buildTownDecorations() {
     // Benches and lamps along the sidewalks, clear of the doorways so no
     // entrance is blocked.
     for (var x = 420.0; x < kWorldWidth - 220; x += 420) {
-      if (x > kCrossStreetLeft - 180 && x < kCrossStreetRight + 180) continue;
-      if (clearOfDoors(x, margin: 130)) {
+      if (!isOnVerticalStreet(x, margin: 180) &&
+          clearOfDoors(x, margin: 130)) {
         out.add(TownDecoration('bench', x, top - kSidewalkHeight + 24, 84));
       }
-      if (clearOfDoors(x + 210, margin: 130)) {
+      if (!isOnVerticalStreet(x + 210, margin: 180) &&
+          clearOfDoors(x + 210, margin: 130)) {
         out.add(TownDecoration('bench', x + 210, bottom + 26, 84));
       }
     }
     for (var x = 300.0; x < kWorldWidth - 100; x += 340) {
       // Lamps line the highway on the grass just outside the sidewalk:
       // visible from the road, never centered on asphalt, never blocking
-      // the sidewalk way. Cross-street junction is always skipped.
-      if (x > kCrossStreetLeft - 180 && x < kCrossStreetRight + 180) continue;
+      // the sidewalk way. Vertical-street junctions are always skipped.
+      if (isOnVerticalStreet(x, margin: 180)) continue;
       final northX = x;
       final southX = x + 170;
-      if (southX > kCrossStreetLeft - 180 && southX < kCrossStreetRight + 180) {
-        continue;
-      }
+      if (isOnVerticalStreet(southX, margin: 180)) continue;
       final northY = top - kSidewalkHeight - 14;
       final southY = bottom + kSidewalkHeight + 14;
       if (clearOfDoors(northX, margin: 100) &&
@@ -397,12 +434,9 @@ List<TownDecoration> buildTownDecorations() {
     // Explicitly skipped on the road corridor and the crossing street
     // so the 5-dot flower beds never sit centered on a junction.
     for (var x = 160.0; x < kWorldWidth - 260; x += 360) {
-      if (x > kCrossStreetLeft - 200 && x < kCrossStreetRight + 200) continue;
+      if (isOnVerticalStreet(x, margin: 200)) continue;
       final flowerX = x + 180;
-      if (flowerX > kCrossStreetLeft - 200 &&
-          flowerX < kCrossStreetRight + 200) {
-        continue;
-      }
+      if (isOnVerticalStreet(flowerX, margin: 200)) continue;
       if (clearOfDoors(x, margin: 210)) {
         final bushY = top - kSidewalkHeight - 60;
         final flowerY = bottom + kSidewalkHeight + 96;
@@ -416,14 +450,14 @@ List<TownDecoration> buildTownDecorations() {
       }
     }
   }
-  out.add(const TownDecoration('hydrant', 700, 1216, 44));
+  out.add(const TownDecoration('hydrant', 920, 1216, 44));
   out.add(const TownDecoration('hydrant', 3300, 1564, 44));
 
   return out;
 }
 
 /// Where the wanderers of the town are allowed to roam: the sidewalks of
-/// every highway plus the cross-street pavement between them.
+/// every highway plus both vertical streets' pavement between them.
 List<Rect> buildPedestrianBands() => [
   for (final top in kHighwayTops) ...[
     Rect.fromLTRB(140, top - 42, 3760, top - 4),
@@ -434,9 +468,26 @@ List<Rect> buildPedestrianBands() => [
       top + kHighwayHeight + 42,
     ),
   ],
-  const Rect.fromLTRB(2810, 60, 2950, 400),
-  const Rect.fromLTRB(2810, 640, 2950, 960),
-  const Rect.fromLTRB(2810, 1210, 2950, 1620),
-  const Rect.fromLTRB(2810, 1870, 2950, 2220),
-  const Rect.fromLTRB(2810, 2470, 2950, 2840),
+  for (final left in kVerticalStreetLefts) ...[
+    for (final band in const [
+      (top: 60.0, bottom: 400.0),
+      (top: 640.0, bottom: 960.0),
+      (top: 1210.0, bottom: 1620.0),
+      (top: 1870.0, bottom: 2220.0),
+      (top: 2470.0, bottom: 2840.0),
+    ]) ...[
+      Rect.fromLTRB(
+        left - kVerticalSidewalkWidth + 4,
+        band.top,
+        left - 4,
+        band.bottom,
+      ),
+      Rect.fromLTRB(
+        left + kCrossStreetWidth + 4,
+        band.top,
+        left + kCrossStreetWidth + kVerticalSidewalkWidth - 4,
+        band.bottom,
+      ),
+    ],
+  ],
 ];

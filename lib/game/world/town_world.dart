@@ -31,6 +31,10 @@ class TownWorld extends LifeWorld implements TrafficHost {
   /// Live traffic: staggered signals, cars and bicycles per highway.
   late final TrafficSystem traffic = TrafficSystem();
   final List<VehicleComponent> vehicles = [];
+
+  /// Sparse traffic on the two north-south streets. Kept separate from
+  /// [vehicles]: highway following/wrapping logic is horizontal only.
+  final List<CrossStreetVehicle> crossVehicles = [];
   final List<TrafficLightProp> signals = [];
 
   /// Player position fed in by LifeGame each frame (null inside rooms).
@@ -77,7 +81,7 @@ class TownWorld extends LifeWorld implements TrafficHost {
     Rect feet, {
     double minSpeed = 24,
   }) {
-    for (final vehicle in vehicles) {
+    for (final vehicle in [...vehicles, ...crossVehicles]) {
       if (vehicle.speed < minSpeed) continue;
       if (feet.overlaps(vehicle.toRect())) return vehicle;
     }
@@ -458,10 +462,101 @@ class TownWorld extends LifeWorld implements TrafficHost {
     for (final v in vehicles) {
       add(v);
     }
+    _spawnCrossTraffic();
     _playerSolids
       ..clear()
       ..addAll(_solids)
-      ..addAll(vehicles);
+      ..addAll(vehicles)
+      ..addAll(crossVehicles);
+  }
+
+  /// Sparse north-south traffic: a car each way on both vertical streets.
+  /// That is a fraction of the highway fleet, so the side streets stay
+  /// quiet next to the main roads.
+  void _spawnCrossTraffic() {
+    const specs = [
+      (
+        left: kWestStreetLeft,
+        dir: 1,
+        y: 700.0,
+        kind: VehicleKind.car,
+        color: Color(0xFF4A86E8),
+      ),
+      (
+        left: kWestStreetLeft,
+        dir: -1,
+        y: 1950.0,
+        kind: VehicleKind.car,
+        color: Color(0xFFBDC3C7),
+      ),
+      (
+        left: kCrossStreetLeft,
+        dir: 1,
+        y: 1250.0,
+        kind: VehicleKind.car,
+        color: Color(0xFFCC4125),
+      ),
+      (
+        left: kCrossStreetLeft,
+        dir: -1,
+        y: 2650.0,
+        kind: VehicleKind.car,
+        color: Color(0xFF1F1A17),
+      ),
+    ];
+    for (final spec in specs) {
+      final signalized = spec.left == kCrossStreetLeft;
+      final vehicle = CrossStreetVehicle(
+        host: this,
+        kind: spec.kind,
+        streetLeft: spec.left,
+        dir: spec.dir,
+        spawn: Vector2(crossLaneCenterX(spec.left, spec.dir), spec.y),
+        cruiseSpeed: spec.kind == VehicleKind.car
+            ? 120 + random.nextDouble() * 40
+            : 80 + random.nextDouble() * 20,
+        color: spec.color,
+        junctionBlocked: (junction) =>
+            _crossJunctionBlocked(spec.left, signalized, junction),
+        playerAhead: _playerAheadOfCross,
+      );
+      crossVehicles.add(vehicle);
+      add(vehicle);
+    }
+  }
+
+  /// True when a vertical vehicle must hold at [junction]: its highway
+  /// signal is not red yet (signalized street), or highway traffic is
+  /// already crossing/approaching the box.
+  bool _crossJunctionBlocked(double left, bool signalized, int junction) {
+    final top = kHighwayTops[junction];
+    if (signalized && traffic.phaseAt(junction) != LightPhase.red) {
+      return true;
+    }
+    final area = signalized
+        ? Rect.fromLTRB(
+            left,
+            top - 10,
+            left + kCrossStreetWidth,
+            top + kHighwayHeight + 10,
+          )
+        : Rect.fromLTRB(
+            left - 90,
+            top - 10,
+            left + kCrossStreetWidth + 90,
+            top + kHighwayHeight + 10,
+          );
+    return vehicles.any((v) => v.toRect().overlaps(area));
+  }
+
+  /// Distance from a vertical vehicle's front bumper to the player when
+  /// they are standing in its lane ahead (null when clear).
+  double? _playerAheadOfCross(CrossStreetVehicle self) {
+    final p = playerPosition;
+    if (p == null) return null;
+    if ((p.x - self.position.x).abs() > 30) return null;
+    final distance = (p.y - self.position.y) * self.dir - self.halfLen;
+    return distance > -6 && distance < 300 ? distance : null;
   }
 }
 
@@ -637,13 +732,15 @@ class TownBackdrop extends PositionComponent {
         );
       }
 
-      // Zebra crossing where the streets meet.
+      // Zebra crossings where the vertical streets meet the highway.
       final crossing = Paint()..color = const Color(0xFFF2F2F2);
-      for (var x = kCrossStreetLeft + 14; x < kCrossStreetRight - 14; x += 34) {
-        canvas.drawRect(
-          Rect.fromLTWH(x, top + 6, 20, kHighwayHeight - 12),
-          crossing,
-        );
+      for (final left in kVerticalStreetLefts) {
+        for (var x = left + 14; x < left + kCrossStreetWidth - 14; x += 34) {
+          canvas.drawRect(
+            Rect.fromLTWH(x, top + 6, 20, kHighwayHeight - 12),
+            crossing,
+          );
+        }
       }
 
       // Stop lines: where each lane halts for red lights / pedestrians.
@@ -659,23 +756,21 @@ class TownBackdrop extends PositionComponent {
       );
     }
 
-    // Dashed centre line down the cross street, pausing at each highway.
-    for (var y = 40.0; y < kWorldHeight - dashLength; y += dashLength + gap) {
-      if (kHighwayTops.any((t) => y > t - 40 && y < t + kHighwayHeight + 40)) {
-        continue;
-      }
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-            kCrossStreetLeft + kCrossStreetWidth / 2 - 4,
-            y,
-            8,
-            dashLength,
+    // Dashed centre lines down both vertical streets, pausing at each
+    // highway.
+    for (final left in kVerticalStreetLefts) {
+      for (var y = 40.0; y < kWorldHeight - dashLength; y += dashLength + gap) {
+        if (kHighwayTops.any((t) => y > t - 40 && y < t + kHighwayHeight + 40)) {
+          continue;
+        }
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(left + kCrossStreetWidth / 2 - 4, y, 8, dashLength),
+            const Radius.circular(4),
           ),
-          const Radius.circular(4),
-        ),
-        dashes,
-      );
+          dashes,
+        );
+      }
     }
   }
 
