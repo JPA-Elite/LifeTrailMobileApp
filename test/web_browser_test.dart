@@ -228,6 +228,58 @@ void main() {
       expect(tester.getTopLeft(masthead), mastheadTop);
     });
 
+    testWidgets('the corner joystick steers the cursor without clicking', (
+      tester,
+    ) async {
+      await _pumpBrowser(tester);
+
+      final cursor = find.byKey(const ValueKey('retroweb_cursor'));
+      final base = find.byKey(const ValueKey('retroweb_stick_base'));
+      final knob = find.byKey(const ValueKey('retroweb_stick_knob'));
+      expect(base, findsOneWidget);
+      expect(knob, findsOneWidget);
+      final before = tester.getTopLeft(cursor);
+      final center = tester.getCenter(base);
+
+      // The stick lives in the lower-right corner, clear of the scroll rail.
+      final screen = tester.getSize(find.byType(RetroBrowser));
+      expect(center.dx, greaterThan(screen.width * 0.85));
+      expect(center.dy, greaterThan(screen.height * 0.75));
+
+      final gesture = await tester.startGesture(center);
+      await tester.pump();
+      await gesture.moveTo(center + const Offset(0, -26));
+      await tester.pump();
+      for (var frame = 0; frame < 12; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await gesture.up();
+      await tester.pump();
+
+      final after = tester.getTopLeft(cursor);
+      expect(after.dy, lessThan(before.dy - 30));
+      expect(after.dx, closeTo(before.dx, 6));
+      // A stick press is not a click: the portal is still on screen.
+      expect(find.text('The small web, hand-indexed.'), findsOneWidget);
+      // Releasing recentres the knob.
+      expect(tester.getCenter(knob), center);
+
+      // Steering down and right steers the same way on screen.
+      final down = await tester.startGesture(center);
+      await tester.pump();
+      await down.moveTo(center + const Offset(26, 26));
+      await tester.pump();
+      for (var frame = 0; frame < 12; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await down.up();
+      await tester.pump();
+
+      final steered = tester.getTopLeft(cursor);
+      expect(steered.dy, greaterThan(after.dy + 20));
+      expect(steered.dx, greaterThan(after.dx + 20));
+    });
+
     testWidgets('bookmarking from the toolbar fills the bookmark list', (
       tester,
     ) async {

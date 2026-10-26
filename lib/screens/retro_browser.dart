@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/web_site.dart';
@@ -12,11 +13,11 @@ enum _BrowserOverlay { none, search, directory, bookmarks }
 
 /// A fully clickable RetroWeb browser for the living-room television.
 ///
-/// Drag (or tap) anywhere in the page area to move the arrow cursor. A tap
-/// clicks whatever sits under the cursor; every clickable thing is registered
-/// with a [WebCursorController], including links, quiz answers, and browser
-/// chrome. The parent television supplies [onExit] and receives the number of
-/// destination pages opened through [onPagesVisited].
+/// Steer the corner joystick, drag anywhere in the page, or tap to move the
+/// arrow cursor. A tap clicks whatever sits under the cursor; every clickable
+/// thing is registered with a [WebCursorController], including links, quiz
+/// answers, and browser chrome. The parent television supplies [onExit] and
+/// receives the number of destination pages opened through [onPagesVisited].
 class RetroBrowser extends StatefulWidget {
   const RetroBrowser({super.key, required this.onExit, this.onPagesVisited});
 
@@ -27,14 +28,35 @@ class RetroBrowser extends StatefulWidget {
   State<RetroBrowser> createState() => _RetroBrowserState();
 }
 
-class _RetroBrowserState extends State<RetroBrowser> {
+class _RetroBrowserState extends State<RetroBrowser>
+    with SingleTickerProviderStateMixin {
   final WebCursorController _cursor = WebCursorController();
   final ScrollController _scroll = ScrollController();
   final ScrollController _directoryScroll = ScrollController();
   final GlobalKey _viewportKey = GlobalKey();
+  final GlobalKey _pageAreaKey = GlobalKey();
   final TextEditingController _search = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
   final math.Random _random = math.Random();
+
+  /// Joystick: a fixed base in the lower-right corner that steers the cursor
+  /// while held. The knob offset is published separately so steering only
+  /// repaints the stick, never the whole page.
+  static const double _stickRadius = 27;
+  static const double _stickHitRadius = 34;
+  static const double _stickKnobRadius = 11;
+  static const double _stickMaxSpeed = 340;
+  static const double _stickDeadzone = 0.2;
+
+  /// Distance from the anchored corner: the right edge and the bottom edge of
+  /// the page area. 64 keeps the ring and its touch zone clear of the rail.
+  static const Offset _stickInset = Offset(64, 44);
+
+  late final Ticker _stickTicker;
+  final ValueNotifier<Offset?> _stickKnob = ValueNotifier<Offset?>(null);
+  int? _stickPointer;
+  Offset _stickVector = Offset.zero;
+  Duration _stickLastTick = Duration.zero;
 
   final List<String> _history = <String>[WebSiteCatalog.home.id];
   final Set<String> _bookmarks = <String>{};
@@ -47,6 +69,7 @@ class _RetroBrowserState extends State<RetroBrowser> {
   _BrowserOverlay _overlay = _BrowserOverlay.none;
   String? _directoryCategory;
 
+  int? _dragPointer;
   Offset? _dragStart;
   Offset? _dragCursorStart;
   bool _dragging = false;
@@ -59,8 +82,16 @@ class _RetroBrowserState extends State<RetroBrowser> {
   bool get _canGoForward => _historyIndex < _history.length - 1;
 
   @override
+  void initState() {
+    super.initState();
+    _stickTicker = createTicker(_onStickTick);
+  }
+
+  @override
   void dispose() {
     _toastTimer?.cancel();
+    _stickTicker.dispose();
+    _stickKnob.dispose();
     _cursor.dispose();
     _scroll.dispose();
     _directoryScroll.dispose();
@@ -135,6 +166,7 @@ class _RetroBrowserState extends State<RetroBrowser> {
   }
 
   void _resetPage() {
+    _endStick();
     _cursor.clearHover();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -165,6 +197,7 @@ class _RetroBrowserState extends State<RetroBrowser> {
   // ----------------------------------------------------------------- overlays
 
   void _openSearch([String? query]) {
+    _endStick();
     if (query != null) _search.text = query;
     setState(() => _overlay = _BrowserOverlay.search);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -175,6 +208,7 @@ class _RetroBrowserState extends State<RetroBrowser> {
   }
 
   void _openDirectory([String? category]) {
+    _endStick();
     setState(() {
       _overlay = _BrowserOverlay.directory;
       _directoryCategory = category;
@@ -186,11 +220,13 @@ class _RetroBrowserState extends State<RetroBrowser> {
   }
 
   void _openBookmarks() {
+    _endStick();
     setState(() => _overlay = _BrowserOverlay.bookmarks);
     _cursor.clearHover();
   }
 
   void _closeOverlay() {
+    _endStick();
     FocusScope.of(context).unfocus();
     _cursor.clearHover();
     setState(() => _overlay = _BrowserOverlay.none);
@@ -233,6 +269,15 @@ class _RetroBrowserState extends State<RetroBrowser> {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    if (_stickPointer == null &&
+        _overlay == _BrowserOverlay.none &&
+        _inStickZone(event.position)) {
+      _stickPointer = event.pointer;
+      _beginStick(event.position);
+      return;
+    }
+    if (_dragPointer != null) return;
+    _dragPointer = event.pointer;
     _dragStart = event.localPosition;
     _dragCursorStart = _cursor.position.value;
     _dragging = false;
@@ -240,6 +285,11 @@ class _RetroBrowserState extends State<RetroBrowser> {
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (event.pointer == _stickPointer) {
+      _steerStick(event.position);
+      return;
+    }
+    if (event.pointer != _dragPointer) return;
     final start = _dragStart;
     if (start == null) {
       _moveCursorTo(event.localPosition);
@@ -256,6 +306,12 @@ class _RetroBrowserState extends State<RetroBrowser> {
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (event.pointer == _stickPointer) {
+      _endStick();
+      return;
+    }
+    if (event.pointer != _dragPointer) return;
+    _dragPointer = null;
     final wasDragging = _dragging;
     _dragStart = null;
     _dragCursorStart = null;
@@ -266,9 +322,83 @@ class _RetroBrowserState extends State<RetroBrowser> {
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
+    if (event.pointer == _stickPointer) {
+      _endStick();
+      return;
+    }
+    if (event.pointer != _dragPointer) return;
+    _dragPointer = null;
     _dragStart = null;
     _dragCursorStart = null;
     _dragging = false;
+  }
+
+  // ---------------------------------------------------------------- joystick
+
+  /// The stick lives in the page area (between the toolbar and the status
+  /// bar), so its centre is resolved from that box in global coordinates:
+  /// the same point the painter uses, with no chrome arithmetic to drift.
+  Offset? _stickCenterGlobal() {
+    final box = _pageAreaKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.localToGlobal(
+      Offset(
+        box.size.width - _stickInset.dx,
+        math.max(_stickInset.dy, box.size.height - _stickInset.dy),
+      ),
+    );
+  }
+
+  bool _inStickZone(Offset global) {
+    final center = _stickCenterGlobal();
+    if (center == null) return false;
+    return (global - center).distance <= _stickHitRadius;
+  }
+
+  void _beginStick(Offset global) {
+    HapticFeedback.selectionClick();
+    _stickLastTick = Duration.zero;
+    _stickTicker.start();
+    _steerStick(global);
+  }
+
+  void _steerStick(Offset global) {
+    final center = _stickCenterGlobal();
+    if (center == null) return;
+    final delta = global - center;
+    final distance = delta.distance;
+    final knob = distance > _stickRadius
+        ? delta / distance * _stickRadius
+        : delta;
+    _stickKnob.value = knob;
+    final magnitude = distance / _stickRadius;
+    if (magnitude <= _stickDeadzone) {
+      _stickVector = Offset.zero;
+      return;
+    }
+    final eased =
+        (magnitude.clamp(0.0, 1.0) - _stickDeadzone) / (1 - _stickDeadzone);
+    _stickVector = delta / distance * eased;
+  }
+
+  void _endStick() {
+    _stickPointer = null;
+    _stickVector = Offset.zero;
+    _stickLastTick = Duration.zero;
+    _stickKnob.value = null;
+    if (_stickTicker.isActive) _stickTicker.stop();
+  }
+
+  void _onStickTick(Duration elapsed) {
+    if (_stickPointer == null || _stickVector == Offset.zero) return;
+    final last = _stickLastTick;
+    _stickLastTick = elapsed;
+    if (last == Duration.zero) return;
+    final dt = ((elapsed - last).inMicroseconds / 1000000).clamp(0.0, 0.08);
+    if (dt <= 0) return;
+    _setCursor(
+      _cursor.position.value + _stickVector * _stickMaxSpeed * dt.toDouble(),
+    );
   }
 
   void _clickAt(Offset local) {
@@ -362,10 +492,13 @@ class _RetroBrowserState extends State<RetroBrowser> {
                           _toolbar(),
                           Expanded(
                             child: Stack(
+                              key: _pageAreaKey,
                               fit: StackFit.expand,
                               children: [
                                 _pageView(),
                                 _scrollRail(),
+                                if (_overlay == _BrowserOverlay.none)
+                                  _joystick(),
                                 if (_overlay != _BrowserOverlay.none)
                                   Positioned.fill(child: _overlayView()),
                                 if (_toast != null)
@@ -664,6 +797,65 @@ class _RetroBrowserState extends State<RetroBrowser> {
     );
   }
 
+  Widget _joystick() {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final center = Offset(
+              constraints.maxWidth - _stickInset.dx,
+              math.max(_stickInset.dy, constraints.maxHeight - _stickInset.dy),
+            );
+            return ValueListenableBuilder<Offset?>(
+              valueListenable: _stickKnob,
+              builder: (context, knob, _) {
+                final active = knob != null;
+                final offset = knob ?? Offset.zero;
+                return Stack(
+                  children: [
+                    Positioned(
+                      left: center.dx - _stickRadius,
+                      top: center.dy - _stickRadius,
+                      width: _stickRadius * 2,
+                      height: _stickRadius * 2,
+                      child: CustomPaint(
+                        key: const ValueKey('retroweb_stick_base'),
+                        painter: _StickFacePainter(active: active),
+                      ),
+                    ),
+                    Positioned(
+                      left: center.dx + offset.dx - _stickKnobRadius,
+                      top: center.dy + offset.dy - _stickKnobRadius,
+                      width: _stickKnobRadius * 2,
+                      height: _stickKnobRadius * 2,
+                      child: DecoratedBox(
+                        key: const ValueKey('retroweb_stick_knob'),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: webMint.withAlpha(active ? 235 : 95),
+                          border: Border.all(
+                            color: Colors.black.withAlpha(active ? 120 : 60),
+                            width: 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: webMint.withAlpha(active ? 110 : 30),
+                              blurRadius: active ? 10 : 5,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _railButton(IconData icon, String id, double delta) {
     return BrowserHitBox(
       id: id,
@@ -779,7 +971,7 @@ class _RetroBrowserState extends State<RetroBrowser> {
           ),
           const SizedBox(width: 10),
           const Text(
-            'DRAG cursor · TAP click',
+            'JOYSTICK or DRAG · TAP click',
             style: TextStyle(color: webMuted, fontSize: 8),
           ),
         ],
@@ -1931,8 +2123,9 @@ class _PortalPage extends StatelessWidget {
           SizedBox(width: 7),
           Expanded(
             child: Text(
-              'Drag anywhere on the page to move the arrow cursor. Tap once '
-              'to click. Hold the cursor near the top or bottom edge to scroll.',
+              'Steer the corner joystick or drag anywhere to move the arrow '
+              'cursor. Tap once to click. Hold the cursor near the top or '
+              'bottom edge to scroll.',
               style: TextStyle(color: webMuted, fontSize: 8.5, height: 1.4),
             ),
           ),
@@ -1940,4 +2133,53 @@ class _PortalPage extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The joystick base: a dark well, a ring, and four small direction ticks.
+class _StickFacePainter extends CustomPainter {
+  const _StickFacePainter({required this.active});
+
+  final bool active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.width / 2;
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.1
+      ..color = webMint.withAlpha(active ? 210 : 85);
+    canvas.drawCircle(
+      center,
+      radius - 1,
+      Paint()..color = const Color(0xFF04131A).withAlpha(active ? 180 : 80),
+    );
+    canvas.drawCircle(center, radius - 1, ring);
+    canvas.drawCircle(
+      center,
+      radius * 0.62,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.8
+        ..color = webMint.withAlpha(active ? 70 : 24),
+    );
+    final tick = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round
+      ..color = webMint.withAlpha(active ? 200 : 80);
+    for (var i = 0; i < 4; i++) {
+      final angle = i * math.pi / 2;
+      final direction = Offset(math.cos(angle), math.sin(angle));
+      canvas.drawLine(
+        center + direction * (radius - 7),
+        center + direction * (radius - 2.5),
+        tick,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_StickFacePainter oldDelegate) =>
+      oldDelegate.active != active;
 }
