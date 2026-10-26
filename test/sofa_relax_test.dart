@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lifetrail/game/state/game_state.dart';
 import 'package:lifetrail/game/world/interior_data.dart';
-import 'package:lifetrail/screens/sofa_relax_screen.dart';
+import 'package:lifetrail/screens/relax_scene_screen.dart';
 
 /// A tiny host that pushes the sofa scene like GameScreen does and exposes
 /// the result the scene pops with.

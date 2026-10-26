@@ -26,9 +26,10 @@ import '../models/npc_model.dart';
 import '../models/outfit.dart';
 import '../models/player_model.dart';
 import '../models/quest_model.dart';
+import 'bench_relax_screen.dart';
 import 'cooking_screen.dart';
 import 'dining_table_screen.dart';
-import 'sofa_relax_screen.dart';
+import 'relax_scene_screen.dart';
 import 'tv_screen.dart';
 import 'wardrobe_screen.dart';
 import 'window_view_screen.dart';
@@ -465,10 +466,11 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
-  /// Home sofa: open the dedicated relaxation scene. It adds happiness
+  /// Sofa or bench: open the dedicated relaxation scene. It adds happiness
   /// every five seconds and closes itself when the bar is full.
-  void _performSofaRelax() {
+  void _performRelax(RelaxSpot spot) {
     final gs = ref.read(gameStateProvider);
+    final isBench = spot == RelaxSpot.bench;
     if (gs.player.happiness >= PlayerModel.happinessMax) {
       _flashMessage(
         'You are already full of happiness — no need to sit down.',
@@ -480,10 +482,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     showGeneralDialog<SofaRelaxResult>(
       context: context,
       barrierDismissible: false,
-      barrierLabel: 'Relax on the sofa',
+      barrierLabel: isBench ? 'Relax on the bench' : 'Relax on the sofa',
       barrierColor: Colors.black.withAlpha(190),
       transitionDuration: const Duration(milliseconds: 380),
-      pageBuilder: (_, animation, second) => const SofaRelaxScreen(),
+      pageBuilder: (_, animation, second) => isBench
+          ? const BenchRelaxScreen()
+          : const SofaRelaxScreen(),
       transitionBuilder: (_, animation, second, child) {
         final curved = CurvedAnimation(
           parent: animation,
@@ -503,11 +507,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         _flashMessage('Happiness full — you feel wonderful!', seconds: 4);
       } else if (result.gained > 0) {
         _flashMessage(
-          'You stand up feeling +${result.gained} happier.',
+          isBench
+              ? 'You stand up from the bench feeling +${result.gained} happier.'
+              : 'You stand up feeling +${result.gained} happier.',
           seconds: 4,
         );
       } else {
-        _flashMessage('You stand up feeling cozy.', seconds: 4);
+        _flashMessage(
+          isBench
+              ? 'You stand up from the bench feeling refreshed.'
+              : 'You stand up feeling cozy.',
+          seconds: 4,
+        );
       }
     });
   }
@@ -741,12 +752,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         return;
       }
     }
-    // The home sofa opens the dedicated relaxation scene; every other
+    // Sofas and benches open their dedicated relaxation scenes; every other
     // seat keeps the quick sit-and-rest action.
     if (target is RelaxationSeat) {
       final seat = target as RelaxationSeat;
       if (seat.opensRelaxScene) {
-        _performSofaRelax();
+        _performRelax(seat.relaxSpot);
         return;
       }
     }

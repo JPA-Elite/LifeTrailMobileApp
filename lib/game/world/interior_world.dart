@@ -593,8 +593,21 @@ class InteriorPropBlock extends RectangleComponent
   @override
   bool get isSeat => _sittable;
 
+  /// True for actual benches (not a WORKBENCH or bench-side counter): they
+  /// open the outdoor bench relaxation scene. The word-boundary check keeps
+  /// "workbench" from matching.
+  static final RegExp _benchWord = RegExp(r'\bbench\b');
+
+  bool get _isBench =>
+      _benchWord.hasMatch((prop.label ?? '').toLowerCase()) ||
+      _benchWord.hasMatch((prop.interactLabel ?? '').toLowerCase());
+
   @override
-  bool get opensRelaxScene => prop.relaxScene;
+  bool get opensRelaxScene => prop.relaxScene || _isBench;
+
+  @override
+  RelaxSpot get relaxSpot =>
+      prop.relaxScene ? RelaxSpot.sofa : RelaxSpot.bench;
 
   @override
   bool get opensWardrobe => prop.wardrobe;

@@ -743,7 +743,8 @@ class _GrassPatch {
 ///
 /// Only benches surface an action button ("Sit on the bench"); trees, lamps
 /// and hydrants are scenery and are filtered out of the interact scan.
-class StreetProp extends PositionComponent implements Interactable {
+class StreetProp extends PositionComponent
+    implements Interactable, RelaxationSeat {
   final TownDecoration decoration;
 
   /// Custom tree art (tree.png), assigned in the background by TownWorld.
@@ -883,6 +884,14 @@ class StreetProp extends PositionComponent implements Interactable {
 
   @override
   bool get isSeat => _sittable;
+
+  /// Benches open the full-screen bench relaxation scene, same as the
+  /// home sofa.
+  @override
+  bool get opensRelaxScene => _sittable;
+
+  @override
+  RelaxSpot get relaxSpot => RelaxSpot.bench;
 
   @override
   Vector2 get interactPosition => Vector2(

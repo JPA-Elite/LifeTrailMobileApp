@@ -5,9 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../game/state/game_state.dart';
+import '../game/world/interactable.dart' show RelaxSpot;
 import '../models/player_model.dart';
 
-/// Returned when the player stands up from the sofa.
+/// Returned when the player stands up from a seat.
 class SofaRelaxResult {
   const SofaRelaxResult({required this.gained, required this.reachedFull});
 
@@ -18,34 +19,59 @@ class SofaRelaxResult {
   final bool reachedFull;
 }
 
-/// Full-screen "relax on the sofa" scene.
+/// Builds the animated backdrop for a [RelaxSceneScreen].
+typedef RelaxScenePainterBuilder =
+    CustomPainter Function(double ambient, double breath, bool celebrating);
+
+/// Full-screen "sit and unwind" scene, shared by the home sofa and the
+/// benches around town.
 ///
-/// The player sinks into the home sofa while a cozy, animated living room
-/// plays behind a happiness meter. Every five seconds the meter ticks up by
-/// one point. When happiness fills, the scene celebrates and stands the
-/// player up automatically; the Leave button does the same at any time.
-class SofaRelaxScreen extends ConsumerStatefulWidget {
+/// The player settles onto the seat while a cozy, animated backdrop plays
+/// behind a happiness meter. Every five seconds the meter ticks up by one
+/// point. When happiness fills, the scene celebrates and stands the player up
+/// automatically; the Leave button does the same at any time.
+class RelaxSceneScreen extends ConsumerStatefulWidget {
+  const RelaxSceneScreen({
+    super.key,
+    required this.spot,
+    required this.painterBuilder,
+  });
+
+  /// Which seat flavour to present (copy, palette and seat art).
+  final RelaxSpot spot;
+
+  /// Paints the animated scene behind the controls.
+  final RelaxScenePainterBuilder painterBuilder;
+
+  @override
+  ConsumerState<RelaxSceneScreen> createState() => _RelaxSceneScreenState();
+}
+
+/// The home sofa flavour of [RelaxSceneScreen].
+class SofaRelaxScreen extends StatelessWidget {
   const SofaRelaxScreen({super.key});
 
   @override
-  ConsumerState<SofaRelaxScreen> createState() => _SofaRelaxScreenState();
+  Widget build(BuildContext context) {
+    return RelaxSceneScreen(
+      spot: RelaxSpot.sofa,
+      painterBuilder: (ambient, breath, celebrating) => _CozyRoomPainter(
+        ambient: ambient,
+        breath: breath,
+        celebrating: celebrating,
+      ),
+    );
+  }
 }
 
-class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
+class _RelaxSceneScreenState extends ConsumerState<RelaxSceneScreen>
     with TickerProviderStateMixin {
   static const int _secondsPerPoint = 5;
   static const int _maxHappiness = PlayerModel.happinessMax;
   static const Duration _celebrationTime = Duration(milliseconds: 1900);
 
-  static const List<String> _thoughts = [
-    'The cushions hug you back.',
-    'The TV murmurs something warm.',
-    'Dust motes drift through the sunset.',
-    'Your shoulders finally let go.',
-    'Somewhere, a kettle hums.',
-    'This is exactly where you need to be.',
-    'The room breathes with you.',
-  ];
+  _SpotStyle get _style =>
+      widget.spot == RelaxSpot.bench ? _benchStyle : _sofaStyle;
 
   late final AnimationController _ambient;
   late final AnimationController _breath;
@@ -100,7 +126,7 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
       if (!mounted) return;
       setState(() {
         _gained++;
-        _thought = (_thought + 1) % _thoughts.length;
+        _thought = (_thought + 1) % _style.thoughts.length;
       });
       _cycle.forward(from: 0);
       _plus.forward(from: 0);
@@ -149,19 +175,20 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
   Widget build(BuildContext context) {
     final state = ref.watch(gameStateProvider);
     final happiness = state.player.happiness;
+    final style = _style;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF150F1C),
+      backgroundColor: style.background,
       body: Stack(
         fit: StackFit.expand,
         children: [
           AnimatedBuilder(
             animation: Listenable.merge([_ambient, _breath]),
             builder: (context, _) => CustomPaint(
-              painter: _CozyRoomPainter(
-                ambient: _ambient.value,
-                breath: _breath.value,
-                celebrating: _celebrating,
+              painter: widget.painterBuilder(
+                _ambient.value,
+                _breath.value,
+                _celebrating,
               ),
             ),
           ),
@@ -173,9 +200,9 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
                 if (wide) {
                   return Stack(
                     children: [
-                      const Align(
+                      Align(
                         alignment: Alignment.topLeft,
-                        child: _QuietPill(),
+                        child: _QuietPill(style: style),
                       ),
                       Align(
                         alignment: Alignment.centerRight,
@@ -190,9 +217,9 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
                 }
                 return Stack(
                   children: [
-                    const Align(
+                    Align(
                       alignment: Alignment.topLeft,
-                      child: _QuietPill(),
+                      child: _QuietPill(style: style),
                     ),
                     Align(
                       alignment: Alignment.bottomCenter,
@@ -217,11 +244,12 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
   }
 
   Widget _panel(int happiness) {
+    final style = _style;
     final fraction = (happiness / _maxHappiness).clamp(0.0, 1.0);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF150F1C).withAlpha(224),
+        color: style.panelBackground.withAlpha(224),
         borderRadius: BorderRadius.circular(26),
         border: Border.all(color: Colors.white.withAlpha(26)),
         boxShadow: const [
@@ -243,27 +271,27 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
                 Container(
                   width: 38,
                   height: 38,
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: LinearGradient(
-                      colors: [Color(0xFF4B7AAE), Color(0xFF2E4C74)],
+                      colors: style.iconGradient,
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                   ),
-                  child: const Icon(
-                    Icons.weekend,
-                    color: Color(0xFFFFE3B0),
+                  child: Icon(
+                    style.icon,
+                    color: style.iconTint,
                     size: 21,
                   ),
                 ),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Home · living room',
+                        style.header,
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 15,
@@ -271,11 +299,11 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
                           letterSpacing: 0.2,
                         ),
                       ),
-                      SizedBox(height: 1),
+                      const SizedBox(height: 1),
                       Text(
-                        'Take a breath. You earned it.',
+                        style.tagline,
                         style: TextStyle(
-                          color: Color(0xFFB9A9C6),
+                          color: style.subtitle,
                           fontSize: 11,
                         ),
                       ),
@@ -288,10 +316,10 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                const Text(
+                Text(
                   'Happiness',
                   style: TextStyle(
-                    color: Color(0xFFEADFF2),
+                    color: style.label,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.4,
@@ -311,8 +339,8 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
                 ),
                 Text(
                   ' / $_maxHappiness',
-                  style: const TextStyle(
-                    color: Color(0xFFB9A9C6),
+                  style: TextStyle(
+                    color: style.subtitle,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -320,13 +348,17 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
               ],
             ),
             const SizedBox(height: 7),
-            _HappinessBar(fraction: fraction, celebrating: _celebrating),
+            _HappinessBar(
+              fraction: fraction,
+              celebrating: _celebrating,
+              colors: style.barColors,
+            ),
             const SizedBox(height: 5),
             Text(
               _gained == 0
-                  ? 'Settle in and let the room slow down…'
+                  ? style.settleIn
                   : '+$_gained happiness this sitting',
-              style: const TextStyle(color: Color(0xFF9F8DAE), fontSize: 11),
+              style: TextStyle(color: style.muted, fontSize: 11),
             ),
             const SizedBox(height: 10),
             Row(
@@ -340,6 +372,7 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
                       painter: _RingPainter(
                         progress: _celebrating ? 1 : _cycle.value,
                         celebrating: _celebrating,
+                        colors: style.barColors,
                       ),
                     ),
                   ),
@@ -367,17 +400,17 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
                         children: [
                           Text(
                             'Next +1 happiness in ${seconds}s',
-                            style: const TextStyle(
-                              color: Color(0xFFEADFF2),
+                            style: TextStyle(
+                              color: style.label,
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
                           const SizedBox(height: 2),
-                          const Text(
+                          Text(
                             'Every 5 seconds, while you unwind.',
                             style: TextStyle(
-                              color: Color(0xFF9F8DAE),
+                              color: style.muted,
                               fontSize: 10.5,
                             ),
                           ),
@@ -404,10 +437,10 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
                 ),
               ),
               child: Text(
-                _thoughts[_thought],
+                style.thoughts[_thought],
                 key: ValueKey(_thought),
-                style: const TextStyle(
-                  color: Color(0xFFCDBDD8),
+                style: TextStyle(
+                  color: style.quote,
                   fontSize: 12,
                   fontStyle: FontStyle.italic,
                   height: 1.35,
@@ -420,11 +453,13 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
               child: FilledButton.icon(
                 onPressed: _standUp,
                 icon: const Icon(Icons.directions_walk, size: 19),
-                label: Text(_celebrating ? 'Stand up' : 'Leave the sofa'),
+                label: Text(
+                  _celebrating ? 'Stand up' : style.leaveLabel,
+                ),
                 style: FilledButton.styleFrom(
                   backgroundColor: _celebrating
                       ? const Color(0xFFFFD27A)
-                      : const Color(0xFFE8A06A),
+                      : style.buttonColor,
                   foregroundColor: const Color(0xFF2A1720),
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(
@@ -438,10 +473,10 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
               ),
             ),
             const SizedBox(height: 6),
-            const Center(
+            Center(
               child: Text(
                 'Happiness stops at $_maxHappiness · you stand up automatically',
-                style: TextStyle(color: Color(0xFF7E6D8D), fontSize: 10),
+                style: TextStyle(color: style.faint, fontSize: 10),
               ),
             ),
           ],
@@ -451,27 +486,130 @@ class _SofaRelaxScreenState extends ConsumerState<SofaRelaxScreen>
   }
 }
 
+/// Copy and palette that gives each relaxation spot its own character.
+class _SpotStyle {
+  const _SpotStyle({
+    required this.header,
+    required this.tagline,
+    required this.quietPill,
+    required this.settleIn,
+    required this.leaveLabel,
+    required this.icon,
+    required this.iconGradient,
+    required this.iconTint,
+    required this.background,
+    required this.panelBackground,
+    required this.label,
+    required this.subtitle,
+    required this.muted,
+    required this.quote,
+    required this.faint,
+    required this.buttonColor,
+    required this.barColors,
+    required this.thoughts,
+  });
+
+  final String header;
+  final String tagline;
+  final String quietPill;
+  final String settleIn;
+  final String leaveLabel;
+  final IconData icon;
+  final List<Color> iconGradient;
+  final Color iconTint;
+  final Color background;
+  final Color panelBackground;
+  final Color label;
+  final Color subtitle;
+  final Color muted;
+  final Color quote;
+  final Color faint;
+  final Color buttonColor;
+  final List<Color> barColors;
+  final List<String> thoughts;
+}
+
+const _sofaStyle = _SpotStyle(
+  header: 'Home · living room',
+  tagline: 'Take a breath. You earned it.',
+  quietPill: 'A quiet moment',
+  settleIn: 'Settle in and let the room slow down…',
+  leaveLabel: 'Leave the sofa',
+  icon: Icons.weekend,
+  iconGradient: [Color(0xFF4B7AAE), Color(0xFF2E4C74)],
+  iconTint: Color(0xFFFFE3B0),
+  background: Color(0xFF150F1C),
+  panelBackground: Color(0xFF150F1C),
+  label: Color(0xFFEADFF2),
+  subtitle: Color(0xFFB9A9C6),
+  muted: Color(0xFF9F8DAE),
+  quote: Color(0xFFCDBDD8),
+  faint: Color(0xFF7E6D8D),
+  buttonColor: Color(0xFFE8A06A),
+  barColors: [Color(0xFFFF7A8A), Color(0xFFFFC46B)],
+  thoughts: [
+    'The cushions hug you back.',
+    'The TV murmurs something warm.',
+    'Dust motes drift through the sunset.',
+    'Your shoulders finally let go.',
+    'Somewhere, a kettle hums.',
+    'This is exactly where you need to be.',
+    'The room breathes with you.',
+  ],
+);
+
+const _benchStyle = _SpotStyle(
+  header: 'Town · park bench',
+  tagline: 'Watch the town go by for a while.',
+  quietPill: 'A moment outdoors',
+  settleIn: 'Settle in and let the afternoon drift…',
+  leaveLabel: 'Leave the bench',
+  icon: Icons.park,
+  iconGradient: [Color(0xFF4F8A5B), Color(0xFF2C5A3A)],
+  iconTint: Color(0xFFF4E8B8),
+  background: Color(0xFF101C15),
+  panelBackground: Color(0xFF101C15),
+  label: Color(0xFFE4F0E2),
+  subtitle: Color(0xFFA9C0A9),
+  muted: Color(0xFF8FA990),
+  quote: Color(0xFFCDE0C7),
+  faint: Color(0xFF6E8A72),
+  buttonColor: Color(0xFF9CCB7A),
+  barColors: [Color(0xFF9CD67C), Color(0xFFFFC46B)],
+  thoughts: [
+    'A breeze carries the smell of cut grass.',
+    'Pigeons bicker over crumbs nearby.',
+    'Leaves shuffle along the path.',
+    'The afternoon sun sits warm on your shoulders.',
+    'Somewhere a dog barks, happily.',
+    'Nothing to do but watch the town go by.',
+    'The bench creaks as you settle in.',
+  ],
+);
+
 /// Small floating label in the corner of the scene.
 class _QuietPill extends StatelessWidget {
-  const _QuietPill();
+  const _QuietPill({required this.style});
+
+  final _SpotStyle style;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: const Color(0xFF150F1C).withAlpha(170),
+        color: style.panelBackground.withAlpha(170),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: Colors.white.withAlpha(24)),
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.spa, color: Color(0xFFFFD27A), size: 15),
-          SizedBox(width: 6),
+          const Icon(Icons.spa, color: Color(0xFFFFD27A), size: 15),
+          const SizedBox(width: 6),
           Text(
-            'A quiet moment',
-            style: TextStyle(
+            style.quietPill,
+            style: const TextStyle(
               color: Color(0xFFEADFF2),
               fontSize: 11.5,
               fontWeight: FontWeight.w600,
@@ -487,10 +625,15 @@ class _QuietPill extends StatelessWidget {
 /// The animated happiness bar. Each gain tweens from the previous fill to
 /// the new one, with a soft shine sweeping across the filled part.
 class _HappinessBar extends StatelessWidget {
-  const _HappinessBar({required this.fraction, required this.celebrating});
+  const _HappinessBar({
+    required this.fraction,
+    required this.celebrating,
+    required this.colors,
+  });
 
   final double fraction;
   final bool celebrating;
+  final List<Color> colors;
 
   @override
   Widget build(BuildContext context) {
@@ -513,9 +656,7 @@ class _HappinessBar extends StatelessWidget {
                     widthFactor: value.clamp(0.0, 1.0),
                     child: Container(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFFF7A8A), Color(0xFFFFC46B)],
-                        ),
+                        gradient: LinearGradient(colors: colors),
                         boxShadow: celebrating
                             ? const [
                                 BoxShadow(
@@ -560,10 +701,15 @@ class _HappinessBar extends StatelessWidget {
 
 /// The five-second countdown ring around a little heart.
 class _RingPainter extends CustomPainter {
-  _RingPainter({required this.progress, required this.celebrating});
+  _RingPainter({
+    required this.progress,
+    required this.celebrating,
+    required this.colors,
+  });
 
   final double progress;
   final bool celebrating;
+  final List<Color> colors;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -587,7 +733,7 @@ class _RingPainter extends CustomPainter {
       ..shader = SweepGradient(
         colors: celebrating
             ? const [Color(0xFFFFD27A), Color(0xFFFFF0C2)]
-            : const [Color(0xFFFF7A8A), Color(0xFFFFC46B)],
+            : colors,
         transform: const GradientRotation(-math.pi / 2),
       ).createShader(rect);
     canvas.drawArc(

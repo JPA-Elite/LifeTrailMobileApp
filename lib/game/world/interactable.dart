@@ -23,6 +23,15 @@ abstract class Interactable {
   Future<void> onInteract(LifeInteractContext ctx);
 }
 
+/// Which full-screen relaxation scene a seat opens.
+enum RelaxSpot {
+  /// The cozy living-room sofa (home).
+  sofa,
+
+  /// A park bench in town.
+  bench,
+}
+
 /// Opt-in marker for seats that should open the dedicated relaxation scene
 /// (a full-screen, animated "sit and unwind" experience) instead of the
 /// quick seat rest. Kept separate from [Interactable] so the town's doors,
@@ -30,6 +39,9 @@ abstract class Interactable {
 abstract interface class RelaxationSeat {
   /// True when tapping this seat opens the relaxation scene.
   bool get opensRelaxScene;
+
+  /// Which relaxation scene to open.
+  RelaxSpot get relaxSpot;
 }
 
 /// Opt-in marker for props that open the wardrobe scene (the home closet):
