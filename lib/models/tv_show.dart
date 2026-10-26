@@ -54,7 +54,7 @@ class TvCatalog {
       title: 'Browse the Internet',
       program: 'RetroWeb',
       description:
-          '100 handmade sites, a movable cursor, quizzes, shops, and radio.',
+          '100 handmade sites, tap-to-open pages, quizzes, shops, and radio.',
       activityId: 'tv_internet',
       visual: TvVisual.internet,
       emoji: '🌐',

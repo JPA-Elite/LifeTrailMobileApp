@@ -59,7 +59,7 @@ class WebQuizQuestion {
 /// A single destination in the RetroWeb directory.
 ///
 /// Sites are deliberately data-only: [WebKind] picks the page template and
-/// the browser supplies all of the chrome, cursor handling, and trivia state.
+/// the browser supplies all of the chrome and trivia state.
 class WebSite {
   const WebSite({
     required this.id,
@@ -2934,7 +2934,7 @@ class WebSiteCatalog {
         'directory, or let the browser surprise you.',
     bullets: [
       'Every site is hand-written and safe for a rainy afternoon.',
-      'The cursor is yours: drag to move it, tap to click.',
+      'Everything is one tap away: stories, quizzes, shops, and radio.',
       'Bookmarks are kept for this visit only.',
     ],
     tags: ['directory', 'portal', 'start'],

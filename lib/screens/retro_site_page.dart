@@ -103,10 +103,7 @@ class _RetroSitePageState extends State<RetroSitePage>
         final wide = constraints.maxWidth >= 640;
         return SingleChildScrollView(
           controller: widget.scrollController,
-          // Cursor drags must never scroll the page: the rail and the
-          // edges do that job, so the finger stays a mouse.
-          physics: const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(14, 10, 34, 24),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 860),

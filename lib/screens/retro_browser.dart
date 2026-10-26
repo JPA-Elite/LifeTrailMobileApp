@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/web_site.dart';
@@ -11,13 +10,11 @@ import 'retro_web_kit.dart';
 
 enum _BrowserOverlay { none, search, directory, bookmarks }
 
-/// A fully clickable RetroWeb browser for the living-room television.
+/// A fully touch-driven RetroWeb browser for the living-room television.
 ///
-/// Steer the corner joystick, drag anywhere in the page, or tap to move the
-/// arrow cursor. A tap clicks whatever sits under the cursor; every clickable
-/// thing is registered with a [WebCursorController], including links, quiz
-/// answers, and browser chrome. The parent television supplies [onExit] and
-/// receives the number of destination pages opened through [onPagesVisited].
+/// Tap any link, card, chip, or toolbar button to open it; swipe the page to
+/// scroll. The parent television supplies [onExit] and receives the number of
+/// destination pages opened through [onPagesVisited].
 class RetroBrowser extends StatefulWidget {
   const RetroBrowser({super.key, required this.onExit, this.onPagesVisited});
 
@@ -28,35 +25,12 @@ class RetroBrowser extends StatefulWidget {
   State<RetroBrowser> createState() => _RetroBrowserState();
 }
 
-class _RetroBrowserState extends State<RetroBrowser>
-    with SingleTickerProviderStateMixin {
-  final WebCursorController _cursor = WebCursorController();
+class _RetroBrowserState extends State<RetroBrowser> {
   final ScrollController _scroll = ScrollController();
   final ScrollController _directoryScroll = ScrollController();
-  final GlobalKey _viewportKey = GlobalKey();
-  final GlobalKey _pageAreaKey = GlobalKey();
   final TextEditingController _search = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
   final math.Random _random = math.Random();
-
-  /// Joystick: a fixed base in the lower-right corner that steers the cursor
-  /// while held. The knob offset is published separately so steering only
-  /// repaints the stick, never the whole page.
-  static const double _stickRadius = 27;
-  static const double _stickHitRadius = 34;
-  static const double _stickKnobRadius = 11;
-  static const double _stickMaxSpeed = 340;
-  static const double _stickDeadzone = 0.2;
-
-  /// Distance from the anchored corner: the right edge and the bottom edge of
-  /// the page area. 64 keeps the ring and its touch zone clear of the rail.
-  static const Offset _stickInset = Offset(64, 44);
-
-  late final Ticker _stickTicker;
-  final ValueNotifier<Offset?> _stickKnob = ValueNotifier<Offset?>(null);
-  int? _stickPointer;
-  Offset _stickVector = Offset.zero;
-  Duration _stickLastTick = Duration.zero;
 
   final List<String> _history = <String>[WebSiteCatalog.home.id];
   final Set<String> _bookmarks = <String>{};
@@ -69,12 +43,6 @@ class _RetroBrowserState extends State<RetroBrowser>
   _BrowserOverlay _overlay = _BrowserOverlay.none;
   String? _directoryCategory;
 
-  int? _dragPointer;
-  Offset? _dragStart;
-  Offset? _dragCursorStart;
-  bool _dragging = false;
-  bool _cursorReady = false;
-
   WebSite get _site => WebSiteCatalog.byId(_history[_historyIndex]);
 
   bool get _canGoBack => _historyIndex > 0;
@@ -82,17 +50,8 @@ class _RetroBrowserState extends State<RetroBrowser>
   bool get _canGoForward => _historyIndex < _history.length - 1;
 
   @override
-  void initState() {
-    super.initState();
-    _stickTicker = createTicker(_onStickTick);
-  }
-
-  @override
   void dispose() {
     _toastTimer?.cancel();
-    _stickTicker.dispose();
-    _stickKnob.dispose();
-    _cursor.dispose();
     _scroll.dispose();
     _directoryScroll.dispose();
     _search.dispose();
@@ -166,8 +125,6 @@ class _RetroBrowserState extends State<RetroBrowser>
   }
 
   void _resetPage() {
-    _endStick();
-    _cursor.clearHover();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       for (final position in _scroll.positions) {
@@ -197,7 +154,6 @@ class _RetroBrowserState extends State<RetroBrowser>
   // ----------------------------------------------------------------- overlays
 
   void _openSearch([String? query]) {
-    _endStick();
     if (query != null) _search.text = query;
     setState(() => _overlay = _BrowserOverlay.search);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -208,27 +164,21 @@ class _RetroBrowserState extends State<RetroBrowser>
   }
 
   void _openDirectory([String? category]) {
-    _endStick();
     setState(() {
       _overlay = _BrowserOverlay.directory;
       _directoryCategory = category;
     });
-    _cursor.clearHover();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_directoryScroll.hasClients) _directoryScroll.jumpTo(0);
     });
   }
 
   void _openBookmarks() {
-    _endStick();
     setState(() => _overlay = _BrowserOverlay.bookmarks);
-    _cursor.clearHover();
   }
 
   void _closeOverlay() {
-    _endStick();
     FocusScope.of(context).unfocus();
-    _cursor.clearHover();
     setState(() => _overlay = _BrowserOverlay.none);
   }
 
@@ -241,338 +191,63 @@ class _RetroBrowserState extends State<RetroBrowser>
     _open(results.first.id);
   }
 
-  // ------------------------------------------------------------------- cursor
-
-  void _moveCursorTo(Offset local) {
-    _cursor.position.value = _clampCursor(local);
-    _updateHover();
-  }
-
-  void _setCursor(Offset local) {
-    _cursor.position.value = _clampCursor(local);
-    _updateHover();
-  }
-
-  Offset _clampCursor(Offset local) {
-    final box = _viewportKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return local;
-    return Offset(
-      local.dx.clamp(2, math.max(2, box.size.width - 2)).toDouble(),
-      local.dy.clamp(2, math.max(2, box.size.height - 2)).toDouble(),
-    );
-  }
-
-  void _updateHover() {
-    final box = _viewportKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
-    _cursor.updateHover(box.localToGlobal(_cursor.position.value));
-  }
-
-  void _handlePointerDown(PointerDownEvent event) {
-    if (_stickPointer == null &&
-        _overlay == _BrowserOverlay.none &&
-        _inStickZone(event.position)) {
-      _stickPointer = event.pointer;
-      _beginStick(event.position);
-      return;
-    }
-    if (_dragPointer != null) return;
-    _dragPointer = event.pointer;
-    _dragStart = event.localPosition;
-    _dragCursorStart = _cursor.position.value;
-    _dragging = false;
-    _moveCursorTo(event.localPosition);
-  }
-
-  void _handlePointerMove(PointerMoveEvent event) {
-    if (event.pointer == _stickPointer) {
-      _steerStick(event.position);
-      return;
-    }
-    if (event.pointer != _dragPointer) return;
-    final start = _dragStart;
-    if (start == null) {
-      _moveCursorTo(event.localPosition);
-      return;
-    }
-    final travel = event.localPosition - start;
-    if (!_dragging && travel.distance > 7) _dragging = true;
-    if (_dragging) {
-      _setCursor((_dragCursorStart ?? start) + travel);
-      _edgeScroll(event.localPosition);
-    } else {
-      _moveCursorTo(event.localPosition);
-    }
-  }
-
-  void _handlePointerUp(PointerUpEvent event) {
-    if (event.pointer == _stickPointer) {
-      _endStick();
-      return;
-    }
-    if (event.pointer != _dragPointer) return;
-    _dragPointer = null;
-    final wasDragging = _dragging;
-    _dragStart = null;
-    _dragCursorStart = null;
-    _dragging = false;
-    if (wasDragging) return;
-    _moveCursorTo(event.localPosition);
-    _clickAt(event.localPosition);
-  }
-
-  void _handlePointerCancel(PointerCancelEvent event) {
-    if (event.pointer == _stickPointer) {
-      _endStick();
-      return;
-    }
-    if (event.pointer != _dragPointer) return;
-    _dragPointer = null;
-    _dragStart = null;
-    _dragCursorStart = null;
-    _dragging = false;
-  }
-
-  // ---------------------------------------------------------------- joystick
-
-  /// The stick lives in the page area (between the toolbar and the status
-  /// bar), so its centre is resolved from that box in global coordinates:
-  /// the same point the painter uses, with no chrome arithmetic to drift.
-  Offset? _stickCenterGlobal() {
-    final box = _pageAreaKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return null;
-    return box.localToGlobal(
-      Offset(
-        box.size.width - _stickInset.dx,
-        math.max(_stickInset.dy, box.size.height - _stickInset.dy),
-      ),
-    );
-  }
-
-  bool _inStickZone(Offset global) {
-    final center = _stickCenterGlobal();
-    if (center == null) return false;
-    return (global - center).distance <= _stickHitRadius;
-  }
-
-  void _beginStick(Offset global) {
-    HapticFeedback.selectionClick();
-    _stickLastTick = Duration.zero;
-    _stickTicker.start();
-    _steerStick(global);
-  }
-
-  void _steerStick(Offset global) {
-    final center = _stickCenterGlobal();
-    if (center == null) return;
-    final delta = global - center;
-    final distance = delta.distance;
-    final knob = distance > _stickRadius
-        ? delta / distance * _stickRadius
-        : delta;
-    _stickKnob.value = knob;
-    final magnitude = distance / _stickRadius;
-    if (magnitude <= _stickDeadzone) {
-      _stickVector = Offset.zero;
-      return;
-    }
-    final eased =
-        (magnitude.clamp(0.0, 1.0) - _stickDeadzone) / (1 - _stickDeadzone);
-    _stickVector = delta / distance * eased;
-  }
-
-  void _endStick() {
-    _stickPointer = null;
-    _stickVector = Offset.zero;
-    _stickLastTick = Duration.zero;
-    _stickKnob.value = null;
-    if (_stickTicker.isActive) _stickTicker.stop();
-  }
-
-  void _onStickTick(Duration elapsed) {
-    if (_stickPointer == null || _stickVector == Offset.zero) return;
-    final last = _stickLastTick;
-    _stickLastTick = elapsed;
-    if (last == Duration.zero) return;
-    final dt = ((elapsed - last).inMicroseconds / 1000000).clamp(0.0, 0.08);
-    if (dt <= 0) return;
-    _setCursor(
-      _cursor.position.value + _stickVector * _stickMaxSpeed * dt.toDouble(),
-    );
-  }
-
-  void _clickAt(Offset local) {
-    final box = _viewportKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
-    final global = box.localToGlobal(local);
-    final hit = _cursor.hitAt(global);
-    if (hit == null) return;
-    HapticFeedback.selectionClick();
-    hit.onTap();
-  }
-
-  void _edgeScroll(Offset local) {
-    final box = _viewportKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
-    const chromeTop = 42.0;
-    const chromeBottom = 21.0;
-    if (local.dy < chromeTop + 20) {
-      _scrollBy(-9);
-    } else if (local.dy > box.size.height - chromeBottom - 20) {
-      _scrollBy(9);
-    }
-  }
-
-  ScrollController? get _activeScroll {
-    if (_overlay == _BrowserOverlay.directory ||
-        _overlay == _BrowserOverlay.bookmarks) {
-      return _directoryScroll;
-    }
-    if (_overlay == _BrowserOverlay.search) return null;
-    return _scroll;
-  }
-
-  void _scrollBy(double delta) {
-    final controller = _activeScroll;
-    if (controller == null) return;
-    final positions = controller.positions;
-    if (positions.isEmpty) return;
-    final position = positions.last;
-    final target = (position.pixels + delta).clamp(
-      0.0,
-      position.maxScrollExtent,
-    );
-    position.jumpTo(target.toDouble());
-  }
-
   // --------------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
-    _scheduleInitialCursor();
-    return WebCursorScope(
-      controller: _cursor,
-      child: PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, result) {
-          if (didPop) return;
-          if (_overlay != _BrowserOverlay.none) {
-            _closeOverlay();
-          } else if (_canGoBack) {
-            _step(-1);
-          } else {
-            widget.onExit();
-          }
-        },
-        child: Scaffold(
-          backgroundColor: webInk,
-          resizeToAvoidBottomInset: false,
-          body: SafeArea(
-            minimum: const EdgeInsets.fromLTRB(5, 4, 5, 4),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: webLine, width: 1),
-                color: webInk,
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Listener(
-                  behavior: HitTestBehavior.opaque,
-                  onPointerDown: _handlePointerDown,
-                  onPointerMove: _handlePointerMove,
-                  onPointerUp: _handlePointerUp,
-                  onPointerCancel: _handlePointerCancel,
-                  child: Stack(
-                    key: _viewportKey,
-                    fit: StackFit.expand,
-                    children: [
-                      Column(
-                        children: [
-                          _toolbar(),
-                          Expanded(
-                            child: Stack(
-                              key: _pageAreaKey,
-                              fit: StackFit.expand,
-                              children: [
-                                _pageView(),
-                                _scrollRail(),
-                                if (_overlay == _BrowserOverlay.none)
-                                  _joystick(),
-                                if (_overlay != _BrowserOverlay.none)
-                                  Positioned.fill(child: _overlayView()),
-                                if (_toast != null)
-                                  Positioned(
-                                    left: 46,
-                                    right: 46,
-                                    bottom: 8,
-                                    child: IgnorePointer(
-                                      child: _toastPill(_toast!),
-                                    ),
-                                  ),
-                              ],
-                            ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_overlay != _BrowserOverlay.none) {
+          _closeOverlay();
+        } else if (_canGoBack) {
+          _step(-1);
+        } else {
+          widget.onExit();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: webInk,
+        resizeToAvoidBottomInset: false,
+        body: SafeArea(
+          minimum: const EdgeInsets.fromLTRB(5, 4, 5, 4),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: webLine, width: 1),
+              color: webInk,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Column(
+                children: [
+                  _toolbar(),
+                  Expanded(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        _pageView(),
+                        if (_overlay != _BrowserOverlay.none)
+                          Positioned.fill(child: _overlayView()),
+                        if (_toast != null)
+                          Positioned(
+                            left: 46,
+                            right: 46,
+                            bottom: 8,
+                            child: IgnorePointer(child: _toastPill(_toast!)),
                           ),
-                          _statusBar(),
-                        ],
-                      ),
-                      Positioned.fill(child: _cursorOverlay()),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                  _statusBar(),
+                ],
               ),
             ),
           ),
         ),
       ),
     );
-  }
-
-  Widget _cursorOverlay() {
-    return IgnorePointer(
-      child: ValueListenableBuilder<Offset>(
-        valueListenable: _cursor.position,
-        builder: (context, position, child) {
-          return Stack(
-            children: [
-              Positioned(
-                left: position.dx - 2,
-                top: position.dy - 2,
-                child: ValueListenableBuilder<String?>(
-                  valueListenable: _cursor.hovered,
-                  builder: (context, hovered, _) {
-                    return SizedBox(
-                      key: const ValueKey('retroweb_cursor'),
-                      width: 30,
-                      height: 32,
-                      child: CustomPaint(
-                        painter: WebCursorPainter(active: hovered != null),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  void _scheduleInitialCursor() {
-    if (_cursorReady) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _cursorReady) return;
-      final box = _viewportKey.currentContext?.findRenderObject() as RenderBox?;
-      if (box == null || !box.hasSize) return;
-      _cursorReady = true;
-      const chrome = 42.0 + 21.0;
-      _cursor.position.value = Offset(
-        box.size.width * 0.46,
-        42.0 + math.max(40.0, box.size.height - chrome) * 0.52,
-      );
-      _updateHover();
-    });
   }
 
   Widget _pageView() {
@@ -769,164 +444,6 @@ class _RetroBrowserState extends State<RetroBrowser>
     );
   }
 
-  Widget _scrollRail() {
-    return Positioned(
-      right: 2,
-      top: 6,
-      bottom: 6,
-      width: 22,
-      child: IgnorePointer(
-        ignoring: _overlay != _BrowserOverlay.none,
-        child: Opacity(
-          opacity: _overlay == _BrowserOverlay.none ? 1 : 0,
-          child: Column(
-            children: [
-              _railButton(Icons.keyboard_arrow_up_rounded, 'scroll_up', -120),
-              const SizedBox(height: 2),
-              Expanded(child: _scrollThumb(_scroll)),
-              const SizedBox(height: 2),
-              _railButton(
-                Icons.keyboard_arrow_down_rounded,
-                'scroll_down',
-                120,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _joystick() {
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final center = Offset(
-              constraints.maxWidth - _stickInset.dx,
-              math.max(_stickInset.dy, constraints.maxHeight - _stickInset.dy),
-            );
-            return ValueListenableBuilder<Offset?>(
-              valueListenable: _stickKnob,
-              builder: (context, knob, _) {
-                final active = knob != null;
-                final offset = knob ?? Offset.zero;
-                return Stack(
-                  children: [
-                    Positioned(
-                      left: center.dx - _stickRadius,
-                      top: center.dy - _stickRadius,
-                      width: _stickRadius * 2,
-                      height: _stickRadius * 2,
-                      child: CustomPaint(
-                        key: const ValueKey('retroweb_stick_base'),
-                        painter: _StickFacePainter(active: active),
-                      ),
-                    ),
-                    Positioned(
-                      left: center.dx + offset.dx - _stickKnobRadius,
-                      top: center.dy + offset.dy - _stickKnobRadius,
-                      width: _stickKnobRadius * 2,
-                      height: _stickKnobRadius * 2,
-                      child: DecoratedBox(
-                        key: const ValueKey('retroweb_stick_knob'),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: webMint.withAlpha(active ? 235 : 95),
-                          border: Border.all(
-                            color: Colors.black.withAlpha(active ? 120 : 60),
-                            width: 1,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: webMint.withAlpha(active ? 110 : 30),
-                              blurRadius: active ? 10 : 5,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _railButton(IconData icon, String id, double delta) {
-    return BrowserHitBox(
-      id: id,
-      onTap: () => _scrollBy(delta),
-      radius: 5,
-      child: Container(
-        width: 20,
-        height: 18,
-        decoration: BoxDecoration(
-          color: Colors.black.withAlpha(80),
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: webLine.withAlpha(160)),
-        ),
-        child: Icon(icon, size: 13, color: webMuted),
-      ),
-    );
-  }
-
-  Widget _scrollThumb(ScrollController controller) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return AnimatedBuilder(
-          animation: controller,
-          builder: (context, child) {
-            var fraction = 0.0;
-            var visible = 0.45;
-            final positions = controller.positions;
-            if (positions.isNotEmpty) {
-              final position = positions.last;
-              if (position.maxScrollExtent > 0) {
-                fraction = (position.pixels / position.maxScrollExtent)
-                    .clamp(0.0, 1.0)
-                    .toDouble();
-                visible =
-                    (position.viewportDimension /
-                            (position.maxScrollExtent +
-                                position.viewportDimension))
-                        .clamp(0.12, 1.0)
-                        .toDouble();
-              }
-            }
-            final track = constraints.maxHeight;
-            final height = math.max(12.0, track * visible);
-            final top = (track - height) * fraction;
-            return Stack(
-              children: [
-                Positioned.fill(
-                  child: Center(
-                    child: Container(width: 2, color: webLine.withAlpha(120)),
-                  ),
-                ),
-                Positioned(
-                  top: top,
-                  left: 7,
-                  child: Container(
-                    width: 6,
-                    height: height,
-                    decoration: BoxDecoration(
-                      color: webMint.withAlpha(170),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   Widget _statusBar() {
     final site = _site;
     return Container(
@@ -971,7 +488,7 @@ class _RetroBrowserState extends State<RetroBrowser>
           ),
           const SizedBox(width: 10),
           const Text(
-            'JOYSTICK or DRAG · TAP click',
+            'TAP to open · SWIPE to scroll',
             style: TextStyle(color: webMuted, fontSize: 8),
           ),
         ],
@@ -1394,14 +911,6 @@ class _RetroBrowserState extends State<RetroBrowser>
     return _panel(
       title: 'The directory · ${sites.length} sites',
       icon: Icons.grid_view_rounded,
-      actions: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _railButton(Icons.keyboard_arrow_up_rounded, 'directory_up', -120),
-          const SizedBox(width: 3),
-          _railButton(Icons.keyboard_arrow_down_rounded, 'directory_down', 120),
-        ],
-      ),
       body: Padding(
         padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
         child: Column(
@@ -1706,10 +1215,7 @@ class _PortalPage extends StatelessWidget {
     ];
     return SingleChildScrollView(
       controller: scrollController,
-      // The browser's drag gesture moves the cursor, so the portal must
-      // not steal it: scrolling happens through the rail or the edges.
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(14, 12, 34, 22),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 22),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 860),
@@ -2119,13 +1625,13 @@ class _PortalPage extends StatelessWidget {
       ),
       child: const Row(
         children: [
-          Icon(Icons.mouse_rounded, size: 14, color: webMint),
+          Icon(Icons.touch_app_rounded, size: 14, color: webMint),
           SizedBox(width: 7),
           Expanded(
             child: Text(
-              'Steer the corner joystick or drag anywhere to move the arrow '
-              'cursor. Tap once to click. Hold the cursor near the top or '
-              'bottom edge to scroll.',
+              'Tap any headline, chip, or button to open it. Swipe up or down '
+              'to scroll the page. Use the bookmark and directory buttons in '
+              'the toolbar to keep track of places.',
               style: TextStyle(color: webMuted, fontSize: 8.5, height: 1.4),
             ),
           ),
@@ -2133,53 +1639,4 @@ class _PortalPage extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The joystick base: a dark well, a ring, and four small direction ticks.
-class _StickFacePainter extends CustomPainter {
-  const _StickFacePainter({required this.active});
-
-  final bool active;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = size.width / 2;
-    final ring = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.1
-      ..color = webMint.withAlpha(active ? 210 : 85);
-    canvas.drawCircle(
-      center,
-      radius - 1,
-      Paint()..color = const Color(0xFF04131A).withAlpha(active ? 180 : 80),
-    );
-    canvas.drawCircle(center, radius - 1, ring);
-    canvas.drawCircle(
-      center,
-      radius * 0.62,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.8
-        ..color = webMint.withAlpha(active ? 70 : 24),
-    );
-    final tick = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.4
-      ..strokeCap = StrokeCap.round
-      ..color = webMint.withAlpha(active ? 200 : 80);
-    for (var i = 0; i < 4; i++) {
-      final angle = i * math.pi / 2;
-      final direction = Offset(math.cos(angle), math.sin(angle));
-      canvas.drawLine(
-        center + direction * (radius - 7),
-        center + direction * (radius - 2.5),
-        tick,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_StickFacePainter oldDelegate) =>
-      oldDelegate.active != active;
 }

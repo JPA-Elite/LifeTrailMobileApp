@@ -141,7 +141,7 @@ void main() {
       expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
     });
 
-    testWidgets('internet channel opens the cursor browser and charges once', (
+    testWidgets('internet channel opens the touch browser and charges once', (
       tester,
     ) async {
       await _setPhoneLandscape(tester);
@@ -157,7 +157,8 @@ void main() {
       expect(state.time.minutes, 7 * 60 + 60);
       expect(find.byType(RetroBrowser), findsOneWidget);
       expect(find.text('The small web, hand-indexed.'), findsOneWidget);
-      expect(find.byKey(const ValueKey('retroweb_cursor')), findsOneWidget);
+      expect(find.byKey(const ValueKey('retroweb_cursor')), findsNothing);
+      expect(find.text('TAP to open · SWIPE to scroll'), findsOneWidget);
 
       // Browsing pages is free inside the already-paid TV visit.
       await tester.tap(find.text('The Harbor Herald'));

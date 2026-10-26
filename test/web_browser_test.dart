@@ -182,102 +182,43 @@ void main() {
       expect(find.textContaining('Correct.'), findsWidgets);
     });
 
-    testWidgets('dragging moves the cursor, a tap clicks under it', (
-      tester,
-    ) async {
-      await _pumpBrowser(tester);
-
-      final cursor = find.byKey(const ValueKey('retroweb_cursor'));
-      expect(cursor, findsOneWidget);
-      final before = tester.getTopLeft(cursor);
-
-      await tester.dragFrom(
-        const Offset(480, 320),
-        const Offset(90, 24),
-        touchSlopX: 0,
-        touchSlopY: 0,
-      );
-      await tester.pump();
-
-      final after = tester.getTopLeft(cursor);
-      expect(after.dx - before.dx, closeTo(90, 4));
-      expect(after.dy - before.dy, closeTo(24, 4));
-    });
-
-    testWidgets('dragging on a page moves the cursor without scrolling', (
+    testWidgets('swiping a page scrolls it without opening a link', (
       tester,
     ) async {
       await _pumpBrowser(tester);
       await tester.tap(find.text('The Harbor Herald'));
       await tester.pump();
 
-      final cursor = find.byKey(const ValueKey('retroweb_cursor'));
-      final before = tester.getTopLeft(cursor);
       final masthead = find.text('The Harbor Herald').first;
-      final mastheadTop = tester.getTopLeft(masthead);
+      final before = tester.getTopLeft(masthead);
 
       await tester.dragFrom(
-        const Offset(480, 360),
-        const Offset(0, -150),
+        const Offset(500, 380),
+        const Offset(0, -220),
         touchSlopX: 0,
         touchSlopY: 0,
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
-      expect(tester.getTopLeft(cursor).dy - before.dy, closeTo(-150, 4));
-      expect(tester.getTopLeft(masthead), mastheadTop);
+      expect(tester.getTopLeft(masthead).dy, lessThan(before.dy - 100));
+      // A swipe is not a tap: the same page is still showing.
+      expect(find.text('The Harbor Herald'), findsWidgets);
+      expect(find.text('1 page visited'), findsOneWidget);
     });
 
-    testWidgets('the corner joystick steers the cursor without clicking', (
-      tester,
-    ) async {
+    testWidgets('tapping the far end of a card opens it', (tester) async {
       await _pumpBrowser(tester);
 
-      final cursor = find.byKey(const ValueKey('retroweb_cursor'));
-      final base = find.byKey(const ValueKey('retroweb_stick_base'));
-      final knob = find.byKey(const ValueKey('retroweb_stick_knob'));
-      expect(base, findsOneWidget);
-      expect(knob, findsOneWidget);
-      final before = tester.getTopLeft(cursor);
-      final center = tester.getCenter(base);
-
-      // The stick lives in the lower-right corner, clear of the scroll rail.
-      final screen = tester.getSize(find.byType(RetroBrowser));
-      expect(center.dx, greaterThan(screen.width * 0.85));
-      expect(center.dy, greaterThan(screen.height * 0.75));
-
-      final gesture = await tester.startGesture(center);
-      await tester.pump();
-      await gesture.moveTo(center + const Offset(0, -26));
-      await tester.pump();
-      for (var frame = 0; frame < 12; frame++) {
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      await gesture.up();
+      // The card is wide; a touch near its trailing edge must still work.
+      final card = find.text('Silicon Sand');
+      final box = tester.getRect(card);
+      await tester.tapAt(box.centerRight + const Offset(60, 0));
       await tester.pump();
 
-      final after = tester.getTopLeft(cursor);
-      expect(after.dy, lessThan(before.dy - 30));
-      expect(after.dx, closeTo(before.dx, 6));
-      // A stick press is not a click: the portal is still on screen.
-      expect(find.text('The small web, hand-indexed.'), findsOneWidget);
-      // Releasing recentres the knob.
-      expect(tester.getCenter(knob), center);
-
-      // Steering down and right steers the same way on screen.
-      final down = await tester.startGesture(center);
-      await tester.pump();
-      await down.moveTo(center + const Offset(26, 26));
-      await tester.pump();
-      for (var frame = 0; frame < 12; frame++) {
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      await down.up();
-      await tester.pump();
-
-      final steered = tester.getTopLeft(cursor);
-      expect(steered.dy, greaterThan(after.dy + 20));
-      expect(steered.dx, greaterThan(after.dx + 20));
+      expect(
+        find.text('The \$12 router that thinks it is a server'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('bookmarking from the toolbar fills the bookmark list', (
@@ -338,27 +279,22 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
 
-      final controller = WebCursorController();
       final scroll = ScrollController();
-      addTearDown(controller.dispose);
       addTearDown(scroll.dispose);
 
       for (final site in WebSiteCatalog.directory) {
         await tester.pumpWidget(
-          WebCursorScope(
-            controller: controller,
-            child: MaterialApp(
-              home: Scaffold(
-                backgroundColor: webInk,
-                body: RetroSitePage(
-                  site: site,
-                  scrollController: scroll,
-                  onOpenSite: (_) {},
-                  onToast: (_) {},
-                  isBookmarked: false,
-                  onToggleBookmark: () {},
-                  onOpenDirectory: () {},
-                ),
+          MaterialApp(
+            home: Scaffold(
+              backgroundColor: webInk,
+              body: RetroSitePage(
+                site: site,
+                scrollController: scroll,
+                onOpenSite: (_) {},
+                onToast: (_) {},
+                isBookmarked: false,
+                onToggleBookmark: () {},
+                onOpenDirectory: () {},
               ),
             ),
           ),
