@@ -52,6 +52,7 @@ class Activities {
       minutes: 180,
       energyDelta: -25,
       charmDelta: 1,
+      happinessDelta: -1,
     ),
     'church': ActivityConfig(
       id: 'church',
@@ -93,6 +94,23 @@ class Activities {
       charmDelta: 2,
       happinessDelta: 1,
     ),
+    // Browsing shops / window shopping: gentle, cheap, mostly mood.
+    'browse': ActivityConfig(
+      id: 'browse',
+      minutes: 30,
+      energyDelta: -4,
+      charmDelta: 1,
+      happinessDelta: 1,
+    ),
+    // Reading a volume or a study guide somewhere quiet.
+    'read': ActivityConfig(
+      id: 'read',
+      minutes: 30,
+      energyDelta: -4,
+      intelligenceDelta: 1,
+    ),
+    // A short practice quiz: the score decides the reward.
+    'quiz': ActivityConfig(id: 'quiz', minutes: 15, energyDelta: -2),
     // Living-room TV. Every channel is a separate visit: picking one spends
     // energy and advances the clock immediately, so the cost is explicit
     // even if the player turns the TV off a moment later.
@@ -184,15 +202,8 @@ class LocationHours {
     ],
     'workplace': [
       {
-        'weekdays': [
-          'monday',
-          'tuesday',
-          'wednesday',
-          'thursday',
-          'friday',
-          'saturday',
-        ],
-        'start': 17 * 60,
+        'weekdays': ['any'],
+        'start': 6 * 60,
         'end': 20 * 60 + 30,
       },
     ],
@@ -285,6 +296,99 @@ class LocationHours {
       if (minutes >= s && minutes < e) return true;
     }
     return false;
+  }
+
+  /// True when the place never closes (hospital, police, beach, hotel…).
+  static bool isAlwaysOpen(String locationId) =>
+      (hours[locationId] ?? const []).isEmpty;
+
+  /// Human title used by menus and door messages.
+  static String name(String locationId) {
+    switch (locationId) {
+      case 'home':
+        return 'Home';
+      case 'school':
+        return 'School';
+      case 'plaza':
+        return 'Plaza';
+      case 'church':
+        return 'Church';
+      case 'park':
+        return 'Park';
+      case 'workplace':
+        return 'Sunbeam Café';
+      case 'bank':
+        return 'First Bank';
+      case 'mall':
+        return 'Grand Mall';
+      case 'repair':
+        return 'Fix-It Repair';
+      case 'bookstore':
+        return 'Book Store';
+      case 'supermarket':
+        return 'Super Market';
+      case 'pizzahut':
+        return 'Pizza Hut';
+      case 'hospital':
+        return 'Hospital';
+      case 'restaurant':
+        return 'Restaurant';
+      case 'laundry':
+        return 'Laundry Shop';
+      case 'police':
+        return 'Police Station';
+      case 'computer':
+        return 'Computer Center';
+      case 'amusement':
+        return 'Amusement Park';
+      case 'beach':
+        return 'Beach';
+      case 'fishing':
+        return 'Fishing Area';
+      case 'hotel':
+        return 'Hotel';
+      default:
+        return locationId;
+    }
+  }
+
+  /// Opening hours in the same words the menus use.
+  static String label(String locationId) {
+    if (isAlwaysOpen(locationId)) return 'Always open';
+    switch (locationId) {
+      case 'school':
+        return 'Mon–Fri 08:00–15:30';
+      case 'plaza':
+        return 'Daily 07:00–20:00';
+      case 'church':
+        return 'Sun 09:00–13:00, Sat 15:00–18:00';
+      case 'park':
+        return 'Daily 06:00–21:00';
+      case 'workplace':
+        return 'Daily 06:00–20:30';
+      case 'bank':
+        return 'Mon–Fri 09:00–16:00';
+      case 'mall':
+        return 'Daily 10:00–21:00';
+      case 'repair':
+        return 'Daily 09:00–18:00';
+      case 'bookstore':
+        return 'Daily 09:00–20:00';
+      case 'supermarket':
+        return 'Daily 08:00–22:00';
+      case 'pizzahut':
+        return 'Daily 11:00–22:00';
+      case 'restaurant':
+        return 'Daily 11:00–22:00';
+      case 'laundry':
+        return 'Daily 08:00–20:00';
+      case 'computer':
+        return 'Daily 09:00–21:00';
+      case 'amusement':
+        return 'Daily 10:00–21:00';
+      default:
+        return '—';
+    }
   }
 }
 

@@ -102,6 +102,9 @@ class LifeGame extends FlameGame {
   /// door shows [onMessage] and the player stays outside.
   bool Function(String locationId)? canEnterLocation;
 
+  /// Human explanation shown when [canEnterLocation] rejects a door.
+  String Function(String locationId)? locationBlockedMessage;
+
   /// Default (fitted) zoom captured on the first pinch; the clamp stays
   /// relative to this across gestures so repeated pinches can't creep
   /// the range outward.
@@ -157,6 +160,7 @@ class LifeGame extends FlameGame {
     void Function(VehicleKind kind)? onVehicleCrash,
     Random? random,
     this.canEnterLocation,
+    this.locationBlockedMessage,
   }) : onSitDown = onSitDown ?? (() {}),
        onSleepInBed = onSleepInBed ?? (() {}),
        onUseAtm = onUseAtm ?? (() {}),
@@ -249,7 +253,8 @@ class LifeGame extends FlameGame {
   Future<void> enterLocation(String locationId) async {
     if (canEnterLocation != null && !(canEnterLocation!(locationId))) {
       onMessage(
-        'It\'s night time. $locationId is closed. Go home and sleep until morning.',
+        locationBlockedMessage?.call(locationId) ??
+            '$locationId is closed right now.',
       );
       return;
     }

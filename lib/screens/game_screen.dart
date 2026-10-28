@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../game/life_game.dart';
 import '../game/state/game_state.dart';
+import '../game/state/phone_state.dart';
 import '../game/world/interactable.dart';
 import '../game/world/mini_map_scene.dart';
 import '../services/game_data_service.dart';
@@ -20,17 +21,26 @@ import '../widgets/game_hud.dart';
 import '../widgets/action_buttons.dart';
 import '../widgets/dialogue_box.dart';
 import '../widgets/mini_map.dart';
-import '../models/cooking.dart';
 import '../models/location_dialogue.dart';
 import '../models/npc_model.dart';
 import '../models/outfit.dart';
 import '../models/player_model.dart';
 import '../models/quest_model.dart';
+import '../models/venue.dart';
+import '../game/systems/core_systems.dart';
+import '../game/systems/venue_system.dart';
 import 'bench_relax_screen.dart';
 import 'cooking_screen.dart';
 import 'dining_table_screen.dart';
+import 'phone/contacts_app.dart';
+import 'phone/finance_app.dart';
+import 'phone/messages_app.dart';
+import 'phone/school_app.dart';
+import 'phone/calendar_app.dart';
+import 'phone/quests_app.dart';
 import 'relax_scene_screen.dart';
 import 'tv_screen.dart';
+import 'venue_scene_screen.dart';
 import 'wardrobe_screen.dart';
 import 'window_view_screen.dart';
 
@@ -228,10 +238,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         onNearestChanged: (n) => _syncState(() => _nearest = n),
         // Walking through a door swaps the Flame world for the interior
         // scene, so close the action sheet: inside, the room's own
-        // activity point opens it again. Entry also advances 90 min and
-        // is blocked at night except for home (sleep until morning).
+        // activity point opens it again. Entry costs 20 min and follows the
+        // building's real opening hours.
         canEnterLocation: (id) =>
             ref.read(gameStateProvider).canEnterBuilding(id),
+        locationBlockedMessage: (id) =>
+            ref.read(gameStateProvider).buildingBlockedMessage(id),
         onEnterLocation: _handleEnterLocation,
         onOpenLocationMenu: (id) => _syncState(() => _locationSheet = id),
         onLeftLocation: (id) => _syncState(() => _locationSheet = null),
@@ -248,17 +260,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           gs.changeEnergy(-points);
         },
         // Each vehicle impact costs exactly 1 health (LifeGame rate-limits
-        // repeats to one hit every two seconds).
+        // repeats to one hit every two seconds) and knocks 2 off your mood.
         onVehicleCrash: (kind) {
           final gs = ref.read(gameStateProvider);
           if (!mounted || gs.player.health <= 0) return;
           gs.changeHealth(-1);
+          gs.addHappiness(-2);
           HapticFeedback.heavyImpact();
           AudioService().interact();
           _flashMessage(
             kind == VehicleKind.bicycle
-                ? 'A bicycle hit you! -1 health.'
-                : 'A car hit you! -1 health.',
+                ? 'A bicycle hit you! -1 health, -2 mood.'
+                : 'A car hit you! -1 health, -2 mood.',
           );
         },
       );
@@ -437,7 +450,13 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           }
           break;
         case 'happiness':
-          gs.applyEnergy(0); // placeholder, happiness via applyActivity better
+          gs.addHappiness(e.value);
+          break;
+        case 'energy':
+          gs.changeEnergy(e.value);
+          break;
+        case 'health':
+          gs.changeHealth(e.value);
           break;
       }
     }
@@ -554,6 +573,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       final tee = OutfitCatalog.shirtAt(player.shirtIndex);
       final bottoms = OutfitCatalog.shortsAt(player.shortsIndex);
       if (result.changed) {
+        // Changing clothes takes a few minutes.
+        ref.read(gameStateProvider).advanceMinutes(5);
         _flashMessage(
           'Looking sharp — ${tee.name} with ${bottoms.name}.',
           seconds: 4,
@@ -654,10 +675,52 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   void _openWindowView() {
+    // A quiet look outside is a real moment: five minutes pass and it lifts
+    // your mood, but only once per day so it cannot be farmed.
+    final gs = ref.read(gameStateProvider);
+    if ((gs.flags['window_gaze_day'] ?? -1) != gs.time.day) {
+      gs.flags['window_gaze_day'] = gs.time.day;
+      gs.advanceMinutes(5);
+      gs.addHappiness(1);
+    }
     _showScene<void>(
       scene: const WindowViewScreen(),
       barrierLabel: 'Look out the window',
     );
+  }
+
+  /// Opens a town building's full-screen "step inside" scenario. Actions
+  /// inside spend real money, energy and time through [applyVenueAction].
+  /// The scene can hand back to the building's classic activity list
+  /// ("Full menu") or walk the player back out onto the street ("Leave").
+  Future<void> _openVenue(String locationId) async {
+    final venue = VenueCatalog.forId(locationId);
+    if (venue == null) {
+      _syncState(() => _locationSheet = locationId);
+      return;
+    }
+    final result = await _showScene<VenueSceneResult>(
+      scene: VenueSceneScreen(venue: venue),
+      barrierLabel: 'Step into ${venue.title}',
+      barrierColor: const Color(0xF2000000),
+    );
+    if (!mounted || result == null) return;
+    if (result.leaveBuilding) {
+      await _leaveLocation();
+      return;
+    }
+    if (result.openMenu) {
+      _syncState(() => _locationSheet = locationId);
+      return;
+    }
+    if (result.actionsTaken > 0) {
+      _flashMessage(
+        result.lastAction == null
+            ? 'You step back out of ${venue.title}.'
+            : '${result.lastAction} — you head back out of ${venue.title}.',
+        seconds: 4,
+      );
+    }
   }
 
   /// Bed interaction: confirm, fade to black, sleep to next morning 07:00
@@ -712,6 +775,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   void _sitOrInteract() {
     final target = _nearest;
     if (target == null) return;
+    // Town buildings: stepping up to the main counter opens the building's
+    // full-screen scenario (the "Full menu" button inside leads back to the
+    // classic activity list).
+    if (target is VenueScenario) {
+      final venue = target as VenueScenario;
+      if (venue.opensVenueScene) {
+        unawaited(_openVenue(venue.venueId));
+        return;
+      }
+    }
     // Living-room television: channel picker with real activity costs.
     if (target is Television) {
       final tv = target as Television;
@@ -815,16 +888,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   void _handleEnterLocation(String id) {
-    // Every building entry costs 90 min (4 entries = 6 hrs). Advances the
-    // clock so town + interior visuals move through Morning → Afternoon →
-    // Evening → Night, then refreshes NPC schedules for the new time.
+    // Stepping through a door costs a short 20 minutes of travel/settling.
+    // Venue actions carry their own time cost, so entry no longer eats hours.
     final gs = ref.read(gameStateProvider);
     gs.registerBuildingEntry();
     _refreshNpcMarkers();
     _game?.setDayPeriod(gs.time.period);
     _syncState(() => _locationSheet = null);
     _flashMessage(
-      'Entered $id (+1h30m) — Day ${gs.time.day} ${gs.time.clockLabel} ${gs.time.periodLabel}',
+      'Entered ${LocationHours.name(id)} (+20m) — Day ${gs.time.day} '
+      '${gs.time.clockLabel} ${gs.time.periodLabel}',
       seconds: 4,
     );
   }
@@ -985,6 +1058,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               onClose: () => setState(() => _locationSheet = null),
               onLeave: _leaveLocation,
               onMessage: (m) => _flashMessage(m),
+              onOpenVenue: (id) {
+                setState(() => _locationSheet = null);
+                unawaited(_openVenue(id));
+              },
               onSleep: () => _sleepWithTransition(
                 onClosePanel: () => setState(() => _locationSheet = null),
               ),
@@ -1042,6 +1119,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   void _openPhone() {
     final game = _game;
     if (game == null) return;
+    // Seed the phone's contact book and conversations from the live NPC
+    // roster the first time (and whenever someone new appears).
+    final gs = ref.read(gameStateProvider);
+    ref.read(phoneStateProvider).seed(gs.npcs, now: gs.time);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     showModalBottomSheet(
       context: context,
@@ -1356,6 +1437,10 @@ class _LocationPanel extends ConsumerWidget {
   final VoidCallback onLeave;
   final void Function(String) onMessage;
 
+  /// Opens the building's full-screen venue scenario. Null for Home, which
+  /// already has its own sofa/TV/kitchen/dining scenes.
+  final void Function(String)? onOpenVenue;
+
   /// Sleep with the fullscreen fade-to-morning transition (wired to
   /// GameScreen._sleepWithTransition). Falls back to instant sleep if null.
   final Future<void> Function()? onSleep;
@@ -1365,6 +1450,7 @@ class _LocationPanel extends ConsumerWidget {
     required this.onClose,
     required this.onLeave,
     required this.onMessage,
+    this.onOpenVenue,
     this.onSleep,
   });
 
@@ -1372,6 +1458,7 @@ class _LocationPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final gs = ref.watch(gameStateProvider);
     final screenH = MediaQuery.of(context).size.height;
+    final venue = VenueCatalog.forId(locationId);
     // Full-width bottom sheet: stretches edge-to-edge so neither the
     // left nor right side looks spacious/empty on mobile.
     return Align(
@@ -1425,6 +1512,40 @@ class _LocationPanel extends ConsumerWidget {
                   'Day ${gs.time.day} · ${gs.time.clockLabel} · Energy ${gs.player.energy}',
                   style: const TextStyle(fontSize: 12, color: Colors.black54),
                 ),
+                if (onOpenVenue != null && venue != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10, bottom: 2),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: gs.isLocationOpen(locationId)
+                            ? () {
+                                onClose();
+                                onOpenVenue!(locationId);
+                              }
+                            : null,
+                        icon: Icon(venue.icon, size: 19),
+                        label: Text(
+                          gs.isLocationOpen(locationId)
+                              ? 'Step into ${venue.title}'
+                              : '${venue.title} is closed — '
+                                    '${_hoursLabel(locationId)}',
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E5B8A),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 8),
                 ..._actions(context, ref),
                 const Divider(height: 20),
@@ -1444,107 +1565,118 @@ class _LocationPanel extends ConsumerWidget {
     );
   }
 
-  String _title(String id) {
-    switch (id) {
-      case 'home':
-        return 'Home';
-      case 'school':
-        return 'School';
-      case 'plaza':
-        return 'Plaza';
-      case 'church':
-        return 'Church';
-      case 'park':
-        return 'Park';
-      case 'workplace':
-        return 'Sunbeam Café';
-      case 'bank':
-        return 'First Bank';
-      case 'mall':
-        return 'Grand Mall';
-      case 'repair':
-        return 'Fix-It Repair';
-      case 'bookstore':
-        return 'Book Store';
-      case 'supermarket':
-        return 'Super Market';
-      case 'pizzahut':
-        return 'Pizza Hut';
-      case 'hospital':
-        return 'Hospital';
-      case 'restaurant':
-        return 'Restaurant';
-      case 'laundry':
-        return 'Laundry Shop';
-      case 'police':
-        return 'Police Station';
-      case 'computer':
-        return 'Computer Center';
-      case 'amusement':
-        return 'Amusement Park';
-      case 'beach':
-        return 'Beach';
-      case 'fishing':
-        return 'Fishing Area';
-      case 'hotel':
-        return 'Hotel';
-      default:
-        return id;
-    }
-  }
+  String _title(String id) => LocationHours.name(id);
 
-  String _hoursLabel(String id) {
-    switch (id) {
-      case 'school':
-        return 'Mon–Fri 08:00–15:30';
-      case 'plaza':
-        return 'Daily 07:00–20:00';
-      case 'church':
-        return 'Sun 09:00–13:00, Sat 15:00–18:00';
-      case 'park':
-        return 'Daily 06:00–21:00';
-      case 'workplace':
-        return 'Mon–Sat 17:00–20:30';
-      case 'bank':
-        return 'Mon–Fri 09:00–16:00';
-      case 'mall':
-        return 'Daily 10:00–21:00';
-      case 'repair':
-        return 'Daily 09:00–18:00';
-      case 'bookstore':
-        return 'Daily 09:00–20:00';
-      case 'supermarket':
-        return 'Daily 08:00–22:00';
-      case 'pizzahut':
-        return 'Daily 11:00–22:00';
-      case 'hospital':
-        return 'Always open';
-      case 'restaurant':
-        return 'Daily 11:00–22:00';
-      case 'laundry':
-        return 'Daily 08:00–20:00';
-      case 'police':
-        return 'Always open';
-      case 'computer':
-        return 'Daily 09:00–21:00';
-      case 'amusement':
-        return 'Daily 10:00–21:00';
-      case 'beach':
-        return 'Always open';
-      case 'fishing':
-        return 'Always open';
-      case 'hotel':
-        return 'Always open';
-      case 'home':
-        return 'Always open';
-      default:
-        return '—';
-    }
-  }
+  String _hoursLabel(String id) => LocationHours.label(id);
 
   List<Widget> _actions(BuildContext context, WidgetRef ref) {
     final gs = ref.read(gameStateProvider);
     final isOpen = gs.isLocationOpen(locationId);
+    Widget btn(String label, VoidCallback fn, {bool enabled = true}) => Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: ElevatedButton(
+        onPressed: enabled ? fn : null,
+        style: ElevatedButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        ),
+        child: Text(label),
+      ),
+    );
+
+    if (!isOpen) {
+      return [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.orange.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.orange.shade200),
+          ),
+          child: Text(
+            '${_title(locationId)} is closed now.\n'
+            'Open hours: ${_hoursLabel(locationId)}',
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+        btn('Wait 60m', () {
+          gs.advanceMinutes(60);
+          onMessage('Time passes... ${gs.time.clockLabel}');
+        }),
+        btn('Look around (outside)', () {
+          gs.applyActivity('walk');
+          onMessage('You wander nearby for a while.');
+        }),
+      ];
+    }
+
+    if (locationId == 'home') {
+      return [
+        btn('Eat breakfast (+10 energy, 30m)', () {
+          if (!gs.canDoActivity('eat')) {
+            onMessage('Too exhausted to eat? Rest first!');
+            return;
+          }
+          gs.eatMeal();
+          onMessage('You ate a warm meal. Energy +10.');
+        }, enabled: gs.canDoActivity('eat')),
+        btn('Study (+Int +1, Edu +1, 60m)', () {
+          if (!gs.canDoActivity('study')) {
+            onMessage('Too tired to study. Rest!');
+            return;
+          }
+          gs.study();
+          onMessage('You studied. Intelligence +1, Education +1.');
+        }, enabled: gs.canDoActivity('study')),
+        btn('Rest (+20 energy, 30m)', () {
+          gs.applyActivity('rest');
+          onMessage('You rested a bit.');
+        }),
+        btn(
+          'Socialize with family (+Charm 2, 45m)',
+          () {
+            if (!gs.canDoActivity('socialize')) {
+              onMessage('Need energy.');
+              return;
+            }
+            gs.socialize();
+            onMessage('Family chat. Charm +2.');
+          },
+          enabled: gs.canDoActivity('socialize'),
+        ),
+        btn('Sleep → morning 07:00 (saves)', () async {
+          final ok = await showSleepConfirmDialog(context);
+          if (!ok) return;
+          onClose();
+          if (onSleep != null) {
+            await onSleep!();
+          } else {
+            AudioService().sleep();
+            gs.sleep();
+            onMessage(
+              'Morning! Day ${gs.time.day} ${gs.time.clockLabel} '
+              '${gs.time.periodLabel}. Energy restored.',
+            );
+          }
+        }),
+      ];
+    }
+
+    return _venueActions(context, gs, locationId);
+  }
+
+  /// The activity sheet for every non-home building.
+  ///
+  /// The buttons are generated from [VenueCatalog] and applied through
+  /// [applyVenueAction], so the sheet and the full-screen venue scene can
+  /// never drift apart again (the old sheet had its own prices and effects).
+  List<Widget> _venueActions(
+    BuildContext context,
+    GameState gs,
+    String locationId,
+  ) {
     Widget btn(String label, VoidCallback fn, {bool enabled = true}) => Padding(
       padding: const EdgeInsets.only(top: 6),
       child: ElevatedButton(
@@ -1575,114 +1707,77 @@ class _LocationPanel extends ConsumerWidget {
       if (ok) fn();
     }
 
-    if (!isOpen) {
-      return [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.orange.shade50,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.orange.shade200),
-          ),
-          child: Text(
-            '${_title(locationId)} is closed now.\nOpen hours: ${_hoursLabel(locationId)}',
-            style: const TextStyle(fontSize: 12),
-          ),
-        ),
-        btn('Wait 60m', () {
-          gs.advanceMinutes(60);
-          onMessage('Time passes... ${gs.time.clockLabel}');
-        }),
-        btn('Look around (outside)', () {
-          gs.applyActivity('walk');
-          onMessage('You wander nearby for a while.');
-        }),
-      ];
+    final venue = VenueCatalog.forId(locationId);
+    if (venue == null) {
+      return [btn('Look around', () => gs.applyActivity('walk'))];
     }
 
-    switch (locationId) {
-      case 'home':
-        return [
-          btn('Eat breakfast (+10 energy, 30m)', () {
-            if (!gs.canDoActivity('eat')) {
-              onMessage('Too exhausted to eat? Rest first!');
-              return;
-            }
-            gs.eatMeal();
-            onMessage('You ate a warm meal. Energy +10.');
-          }, enabled: gs.canDoActivity('eat')),
-          btn('Study (+Int +1, Edu +1, 60m)', () {
-            if (!gs.canDoActivity('study')) {
-              onMessage('Too tired to study. Rest!');
-              return;
-            }
-            gs.study();
-            onMessage('You studied. Intelligence +1, Education +1.');
-          }, enabled: gs.canDoActivity('study')),
-          btn('Rest (+20 energy, 30m)', () {
-            gs.applyActivity('rest');
-            onMessage('You rested a bit.');
-          }),
-          btn(
-            'Socialize with family (+Charm 2, 45m)',
-            () {
-              if (!gs.canDoActivity('socialize')) {
-                onMessage('Need energy.');
-                return;
-              }
-              gs.socialize();
-              onMessage('Family chat. Charm +2.');
-            },
-            enabled: gs.canDoActivity('socialize'),
-          ),
-          btn('Sleep → morning 07:00 (saves)', () async {
-            final ok = await showSleepConfirmDialog(context);
-            if (!ok) return;
-            onClose();
-            if (onSleep != null) {
-              await onSleep!();
+    final children = <Widget>[
+      Text(
+        '${venue.tagline} · Hours: ${LocationHours.label(locationId)}',
+        style: const TextStyle(fontSize: 11, color: Colors.black54),
+      ),
+    ];
+    if (locationId == 'school') {
+      children.add(
+        Text(
+          'Attendance: ${(gs.player.attendanceRate * 100).toStringAsFixed(0)}%'
+          ' · Int ${gs.player.intelligence}',
+          style: const TextStyle(fontSize: 12),
+        ),
+      );
+    }
+    if (gs.isExhausted) {
+      children.add(
+        const Text(
+          'Exhausted! Rest at home first.',
+          style: TextStyle(fontSize: 11, color: Colors.red),
+        ),
+      );
+    }
+
+    for (final action in venue.actions) {
+      final reason = venueUnavailableReason(gs, action, venue: venue);
+      final chips = action.costChips
+          .where((c) => !c.contains('min'))
+          .toList();
+      children.add(
+        btn(
+          chips.isEmpty
+              ? action.label
+              : '${action.label} (${chips.join(' · ')})',
+          () {
+            final outcome = applyVenueAction(gs, action, venue: venue);
+            if (outcome.ok) {
+              AudioService().interact();
+              HapticFeedback.selectionClick();
             } else {
-              AudioService().sleep();
-              gs.sleep();
-              onMessage(
-                'Morning! Day ${gs.time.day} ${gs.time.clockLabel} ${gs.time.periodLabel}. Energy restored.',
-              );
+              HapticFeedback.heavyImpact();
             }
-          }),
-        ];
+            onMessage(outcome.message);
+          },
+          enabled: reason == null,
+        ),
+      );
+      if (reason != null) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(left: 4, top: 2),
+            child: Text(
+              reason,
+              style: const TextStyle(fontSize: 10, color: Colors.black54),
+            ),
+          ),
+        );
+      }
+    }
+
+    // Unique extras that are not part of the venue scene's action list.
+    switch (locationId) {
       case 'school':
         final quiz = GameDataService().quizBySubject['mathematics'] ?? [];
-        return [
-          Text(
-            'Attendance: ${(gs.player.attendanceRate * 100).toStringAsFixed(0)}% · Int ${gs.player.intelligence}',
-            style: const TextStyle(fontSize: 12),
-          ),
-          if (gs.isExhausted)
-            const Text(
-              'Exhausted! Rest at home first.',
-              style: TextStyle(fontSize: 11, color: Colors.red),
-            ),
-          btn(
-            'Attend class (90m, Int+1 Edu+2)',
-            () {
-              if (!gs.canDoActivity('class')) {
-                onMessage('Too tired for class!');
-                return;
-              }
-              gs.attendClass(present: true);
-              onMessage('Class finished. Intelligence +1, Education +2.');
-            },
-            enabled: gs.canDoActivity('class') && !gs.isExhausted,
-          ),
-          btn('Library study (+Int, 60m)', () {
-            if (!gs.canDoActivity('study')) {
-              onMessage('Too tired.');
-              return;
-            }
-            gs.study();
-            onMessage('Quiet library study. Intelligence +1.');
-          }, enabled: gs.canDoActivity('study')),
-          btn('Take quiz (${quiz.length} questions)', () {
+        children.add(
+          btn('Take quiz (${quiz.length} questions, 15m)', () {
             onClose();
             Navigator.of(context).push(
               MaterialPageRoute(
@@ -1690,6 +1785,8 @@ class _LocationPanel extends ConsumerWidget {
               ),
             );
           }),
+        );
+        children.add(
           btn('Skip class (warning!)', () {
             confirmAnd(
               'Skip class?',
@@ -1702,21 +1799,11 @@ class _LocationPanel extends ConsumerWidget {
               confirmLabel: 'Skip',
             );
           }),
-        ];
+        );
+        break;
       case 'plaza':
-        return [
-          btn('Look for Maria\'s wallet', () {
-            if (gs.quests['missing_wallet']?.status == QuestStatus.active) {
-              gs.completeObjective('missing_wallet', 'search_plaza');
-              gs.addItem('wallet_maria', 1);
-              onMessage('You found a brown wallet near the benches!');
-            } else {
-              onMessage('The plaza is lively. Vendors and students pass by.');
-              gs.applyActivity('walk');
-            }
-          }),
-          btn('Ask vendor about wallet', () {
-            // Summertime Saga: requires being on quest stage
+        children.add(
+          btn('Ask vendor about the wallet', () {
             if (gs.quests['missing_wallet']?.status != QuestStatus.active) {
               onMessage('Vendor: "Come back if you have a reason."');
               return;
@@ -1724,110 +1811,43 @@ class _LocationPanel extends ConsumerWidget {
             gs.completeObjective('missing_wallet', 'talk_vendor');
             onMessage('Vendor: "Yes! Someone left a wallet here."');
           }),
+        );
+        children.add(
           btn('Return wallet to Maria (needs wallet)', () {
-            if (gs.snapshot().inventory.any(
-              (e) => e.itemId == 'wallet_maria',
-            )) {
-              gs.removeItem('wallet_maria', 1);
-              gs.completeObjective('missing_wallet', 'return_wallet');
-              AudioService().coins();
-              onMessage('Maria is delighted! +₱200, relationship up.');
-            } else {
+            if (!gs.hasItems({'wallet_maria': 1})) {
               onMessage('You do not have the wallet yet.');
-            }
-          }),
-          btn(
-            'Chat & charm training (+Charm 2, 45m)',
-            () {
-              if (!gs.canDoActivity('socialize')) {
-                onMessage('Too tired.');
-                return;
-              }
-              gs.socialize();
-              onMessage('You chatted with locals. Charm +2.');
-            },
-            enabled: gs.canDoActivity('socialize'),
-          ),
-          btn('Buy bread ₱25', () {
-            final r = gs.removeMoney(25);
-            if (r.ok) {
-              gs.addItem('bread', 1);
-              onMessage('Bought bread. Check inventory to eat it.');
-            } else {
-              onMessage('Not enough money.');
-            }
-          }),
-        ];
-      case 'church':
-        return [
-          btn('Attend service (+Charm 1, 90m)', () {
-            gs.applyActivity('church');
-            gs.setFlag('visited_church');
-            onMessage('A calm service. Charm +1.');
-          }),
-          btn('Volunteer (+Rel Maria, +Charm)', () {
-            if (!gs.canDoActivity('church')) {
-              onMessage('Too tired.');
               return;
             }
-            gs.applyActivity('church');
-            gs.adjustRelationship('maria', 2);
-            onMessage('You helped set up. Maria +2 rel, Charm +1.');
+            gs.removeItem('wallet_maria', 1);
+            gs.completeObjective('missing_wallet', 'return_wallet');
+            AudioService().coins();
+            onMessage('Maria is delighted! Reward paid, relationship up.');
           }),
-        ];
+        );
+        break;
       case 'park':
-        {
-          final gymQuest = gs.quests['gym_initiation'];
-          return [
-            btn('Gym: Lift weights (+Str 2, 60m)', () {
-              if (!gs.canDoActivity('gym')) {
-                onMessage('Need energy!');
-                return;
-              }
-              gs.applyActivity('gym');
-              // Gym Initiation: "Reach Strength 14 at park gym"
-              if (gymQuest?.status == QuestStatus.active &&
-                  gs.player.strength >= 14) {
-                gs.completeObjective('gym_initiation', 'train_strength');
-              }
-              onMessage('Pump! Strength +2.');
-            }, enabled: gs.canDoActivity('gym')),
-            btn('Jog (+Str 1, 60m)', () {
+        if (gs.quests['gym_initiation']?.status == QuestStatus.active) {
+          children.add(
+            btn('Spar with Ben', () {
               gs.applyActivity('exercise');
-              onMessage('You jogged. Strength +1.');
+              gs.adjustRelationship('ben', 2);
+              gs.completeObjective('gym_initiation', 'spar_ben');
+              onMessage('You spar with Ben. He nods, impressed.');
             }),
-            btn(
-              'Meditate/Relax (+Energy, 30m)',
-              () => gs.applyActivity('rest'),
-            ),
-            if (gymQuest?.status == QuestStatus.active)
-              btn('Spar with Ben', () {
-                gs.applyActivity('exercise');
-                gs.adjustRelationship('ben', 2);
-                gs.completeObjective('gym_initiation', 'spar_ben');
-                onMessage('You spar with Ben. He nods, impressed.');
-              }),
-          ];
+          );
         }
+        break;
       case 'workplace':
-        return [
-          Text(
-            'Shift: 17:00–20:30 · Salary ₱300 (Energy -25)',
-            style: const TextStyle(fontSize: 12),
-          ),
-          if (gs.isExhausted)
-            const Text(
-              'Too tired for shift! Rest first.',
-              style: TextStyle(fontSize: 11, color: Colors.red),
-            ),
-          btn('Start café shift (mini-game)', () {
+        children.add(
+          btn('Café shift mini-game (tips up to ₱320)', () {
             if (!gs.canDoActivity('work')) {
-              onMessage('Need energy for shift!');
+              onMessage('Need energy for a shift!');
               return;
             }
             confirmAnd(
               'Start café shift?',
-              'A 5-customer shift takes 3h and −25 energy. Salary up to ₱300.',
+              'A 5-customer shift takes 3h and −25 energy. '
+                  'Tips depend on service.',
               Icons.coffee,
               () {
                 onClose();
@@ -1838,266 +1858,12 @@ class _LocationPanel extends ConsumerWidget {
               confirmLabel: 'Start shift',
             );
           }, enabled: gs.canDoActivity('work')),
-        ];
-      case 'bank':
-        return [
-          Text(
-            'Balance: ${gs.pesoBalance}',
-            style: const TextStyle(fontSize: 12),
-          ),
-          btn('Withdraw allowance ₱200 (5m)', () {
-            gs.addMoney(200);
-            gs.advanceMinutes(5);
-            AudioService().coins();
-            onMessage('Withdrew ₱200 allowance. Balance: ${gs.pesoBalance}');
-          }),
-          btn('Check balance', () {
-            onMessage('Balance: ${gs.pesoBalance}');
-          }),
-        ];
-      case 'mall':
-        return [
-          btn('Buy snacks ₱30', () {
-            final r = gs.removeMoney(30);
-            if (r.ok) {
-              gs.addItem('bread', 1);
-              onMessage('Bought snacks. Check inventory to eat.');
-            } else {
-              onMessage('Not enough money.');
-            }
-          }),
-          btn('Browse shops (+Charm 1, 30m)', () {
-            if (!gs.canDoActivity('socialize')) {
-              onMessage('Too tired.');
-              return;
-            }
-            gs.applyActivity('rest');
-            gs.addCharm(1);
-            onMessage('Window shopping. Charm +1.');
-          }, enabled: gs.canDoActivity('socialize')),
-          btn('Food court meal ₱50 (+10 energy)', () {
-            final r = gs.removeMoney(50);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            if (!gs.canDoActivity('eat')) {
-              gs.addMoney(50);
-              onMessage('Too exhausted to eat? Rest first! (refunded)');
-              return;
-            }
-            gs.eatMeal();
-            onMessage('A filling food court meal. Energy +10.');
-          }, enabled: gs.canDoActivity('eat')),
-        ];
-      case 'repair':
-        return [
-          btn('Repair bike ₱80 (30m)', () {
-            final r = gs.removeMoney(80);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            gs.advanceMinutes(30);
-            onMessage('Bike tuned up. Rides like new.');
-          }),
-          btn('Browse tools', () {
-            gs.applyActivity('walk');
-            onMessage('Wrenches, chains, and spare bells.');
-          }),
-        ];
-      case 'bookstore':
-        return [
-          btn('Read manga (+Int 1, 30m)', () {
-            if (!gs.canDoActivity('study')) {
-              onMessage('Too tired.');
-              return;
-            }
-            gs.applyActivity('study');
-            gs.addIntelligence(1);
-            onMessage('A whole volume in one sitting. Intelligence +1.');
-          }, enabled: gs.canDoActivity('study')),
-          btn('Buy notebook ₱20', () {
-            final r = gs.removeMoney(20);
-            if (r.ok) {
-              onMessage('A fresh notebook for class.');
-            } else {
-              onMessage('Not enough money.');
-            }
-          }),
-        ];
-      case 'supermarket':
-        return [
-          btn('Buy groceries ₱60', () {
-            final r = gs.removeMoney(60);
-            if (r.ok) {
-              gs.addItem('bread', 2);
-              onMessage('Groceries bagged. Check inventory.');
-            } else {
-              onMessage('Not enough money.');
-            }
-          }),
-          btn('Stock the pantry ₱120', () {
-            final r = gs.removeMoney(120);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            PantryCatalog.groceryBundle.forEach(
-              (itemId, count) => gs.addItem(itemId, count),
-            );
-            onMessage(
-              'Pantry restocked: eggs, milk, rice, chicken, vegetables, '
-              'noodles, tomato, cheese, and bread.',
-            );
-          }),
-          btn('Browse aisles', () {
-            gs.applyActivity('walk');
-            onMessage('Bright aisles and freezer hum.');
-          }),
-        ];
-      case 'pizzahut':
-        return [
-          btn('Eat pizza ₱70 (+10 energy)', () {
-            final r = gs.removeMoney(70);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            if (!gs.canDoActivity('eat')) {
-              gs.addMoney(70);
-              onMessage('Too exhausted to eat? Rest first! (refunded)');
-              return;
-            }
-            gs.eatMeal();
-            onMessage('Cheesy slice. Energy +10.');
-          }, enabled: gs.canDoActivity('eat')),
-        ];
-      case 'hospital':
-        return [
-          Text(
-            'Balance: ${gs.pesoBalance}',
-            style: const TextStyle(fontSize: 12),
-          ),
-          btn('Check-up ₱100 (+15 energy, 30m)', () {
-            final r = gs.removeMoney(100);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            gs.applyEnergy(15);
-            gs.advanceMinutes(30);
-            onMessage('All clear. Feeling much better. (+15 Energy)');
-          }),
-        ];
-      case 'restaurant':
-        return [
-          btn('Eat dinner ₱60 (+10 energy)', () {
-            final r = gs.removeMoney(60);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            if (!gs.canDoActivity('eat')) {
-              gs.addMoney(60);
-              onMessage('Too exhausted to eat? Rest first! (refunded)');
-              return;
-            }
-            gs.eatMeal();
-            onMessage('A warm dinner. Energy +10.');
-          }, enabled: gs.canDoActivity('eat')),
-        ];
-      case 'laundry':
-        return [
-          btn('Wash clothes ₱30 (30m)', () {
-            final r = gs.removeMoney(30);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            gs.advanceMinutes(30);
-            onMessage('Fresh and folded. (+Charm 1)');
-            gs.addCharm(1);
-          }),
-        ];
-      case 'police':
-        return [
-          btn('File a report (+Charm 1, 20m)', () {
-            gs.advanceMinutes(20);
-            gs.addCharm(1);
-            onMessage('Report filed. The officer thanks you. Charm +1.');
-          }),
-          btn('Check notice board', () {
-            onMessage('Lost pets, found bikes, event permits.');
-          }),
-        ];
-      case 'computer':
-        return [
-          btn('Internet hour ₱25 (+Int 1, 60m)', () {
-            final r = gs.removeMoney(25);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            gs.advanceMinutes(60);
-            gs.addIntelligence(1);
-            onMessage('Tutorials and typing drills. Intelligence +1.');
-          }),
-        ];
-      case 'amusement':
-        return [
-          btn('Roller coaster ₱50 (+Charm 1, 60m)', () {
-            final r = gs.removeMoney(50);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            gs.advanceMinutes(60);
-            gs.addCharm(1);
-            onMessage('What a rush! Charm +1.');
-          }),
-          btn('Midway games ₱20', () {
-            final r = gs.removeMoney(20);
-            if (r.ok) {
-              onMessage('So close! The giant plush stays on the shelf.');
-            } else {
-              onMessage('Not enough money.');
-            }
-          }),
-        ];
-      case 'beach':
-        return [
-          btn('Swim (+Str 1, 60m)', () {
-            gs.applyActivity('exercise');
-            onMessage('Against the waves. Strength +1.');
-          }),
-          btn('Sunbathe (+Energy, 30m)', () => gs.applyActivity('rest')),
-        ];
-      case 'fishing':
-        return [
-          btn('Fish for an hour (+₱40 catch, 60m)', () {
-            gs.advanceMinutes(60);
-            gs.addMoney(40);
-            AudioService().coins();
-            onMessage('A decent catch! Sold for ₱40.');
-          }),
-        ];
-      case 'hotel':
-        return [
-          btn('Rest in the lobby ₱150 (+30 energy, 60m)', () {
-            final r = gs.removeMoney(150);
-            if (!r.ok) {
-              onMessage('Not enough money.');
-              return;
-            }
-            gs.applyEnergy(30);
-            gs.advanceMinutes(60);
-            onMessage('Deep armchairs and quiet jazz. (+30 Energy)');
-          }),
-        ];
+        );
+        break;
       default:
-        return [btn('Look around', () => gs.applyActivity('walk'))];
+        break;
     }
+    return children;
   }
 }
 
@@ -2110,6 +1876,7 @@ class _PhoneSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final gs = ref.watch(gameStateProvider);
+    final phone = ref.watch(phoneStateProvider);
     final size = MediaQuery.of(context).size;
     final sheetW = (size.width * 0.92).clamp(280.0, 560.0);
     // Landscape phones are short (~360px tall): 78% with a 420 minimum
@@ -2189,31 +1956,21 @@ class _PhoneSheet extends ConsumerWidget {
                               Icons.chat_bubble_rounded,
                               'Messages',
                               const Color(0xFF4A86E8),
-                              () => _phoneInfo(
-                                context,
-                                'Messages',
-                                'Alex: plaza later?',
-                              ),
+                              () => _openApp(context, const MessagesApp()),
+                              badge: phone.totalUnread,
                             ),
                             _phoneTile(
                               Icons.contacts_rounded,
                               'Contacts',
                               const Color(0xFF8E7CC3),
-                              () => _phoneInfo(
-                                context,
-                                'Contacts',
-                                'No contacts yet.',
-                              ),
+                              () => _openApp(context, const ContactsApp()),
                             ),
                             _phoneTile(
                               Icons.calendar_month_rounded,
                               'Calendar',
                               const Color(0xFFE69138),
-                              () => _phoneInfo(
-                                context,
-                                'Calendar',
-                                'Mon-Fri: School',
-                              ),
+                              () => _openApp(context, const CalendarApp()),
+                              badge: 0,
                             ),
                             _phoneTile(
                               Icons.map_rounded,
@@ -2231,31 +1988,20 @@ class _PhoneSheet extends ConsumerWidget {
                               Icons.account_balance_wallet_rounded,
                               'Finance',
                               const Color(0xFFB45F06),
-                              () => _phoneInfo(
-                                context,
-                                'Finance',
-                                'Balance: ${gs.pesoBalance}',
-                              ),
+                              () => _openApp(context, const FinanceApp()),
                             ),
                             _phoneTile(
                               Icons.backpack_rounded,
                               'Quests',
                               const Color(0xFFCC4125),
-                              () => _phoneInfo(
-                                context,
-                                'Quests',
-                                'No quests yet.',
-                              ),
+                              () => _openApp(context, const QuestsApp()),
+                              badge: gs.quests.values.where((q) => q.status == QuestStatus.active).length,
                             ),
                             _phoneTile(
                               Icons.school_rounded,
                               'School',
                               const Color(0xFF2E7D5B),
-                              () => _phoneInfo(
-                                context,
-                                'School',
-                                'Edu: ${gs.player.education}',
-                              ),
+                              () => _openApp(context, const SchoolApp()),
                             ),
                             _phoneTile(
                               Icons.settings_rounded,
@@ -2295,22 +2041,54 @@ class _PhoneSheet extends ConsumerWidget {
     IconData icon,
     String label,
     Color tint,
-    VoidCallback onTap,
-  ) {
+    VoidCallback onTap, {
+    int badge = 0,
+  }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: tint,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icon, color: Colors.white, size: 22),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: tint,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: Colors.white, size: 22),
+              ),
+              if (badge > 0)
+                Positioned(
+                  top: -4,
+                  right: -4,
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE06666),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '$badge',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 4),
           Text(
@@ -2330,37 +2108,11 @@ class _PhoneSheet extends ConsumerWidget {
     );
   }
 
-  void _phoneInfo(BuildContext context, String title, String body) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        backgroundColor: const Color(0xFFFBF7EC),
-        // Cream background in both modes: pin dark text so this never
-        // becomes white-on-white under the system dark theme.
-        titleTextStyle: const TextStyle(
-          color: Color(0xFF1A1D21),
-          fontWeight: FontWeight.bold,
-          fontSize: 18,
-        ),
-        contentTextStyle: const TextStyle(
-          color: Color(0xFF1A1D21),
-          fontSize: 14,
-        ),
-        title: Text(title, textAlign: TextAlign.center),
-        content: Text(body, textAlign: TextAlign.center),
-        actionsAlignment: MainAxisAlignment.center,
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D5B),
-            ),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+  /// Opens one of the full-screen phone apps on top of the phone sheet.
+  void _openApp(BuildContext context, Widget app) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => app));
   }
 
   void _phoneFullMap(BuildContext context) {
@@ -2426,6 +2178,8 @@ class QuizScreen extends ConsumerStatefulWidget {
 
 class _QuizScreenState extends ConsumerState<QuizScreen> {
   int _index = 0;
+  int _score = 0;
+  QuizResult? _result;
 
   @override
   Widget build(BuildContext context) {
@@ -2437,6 +2191,67 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
         extendBodyBehindAppBar: true,
         appBar: AppBar(title: const Text('Quiz')),
         body: const Center(child: Text('No questions yet.')),
+      );
+    }
+    final result = _result;
+    if (result != null) {
+      return Scaffold(
+        extendBody: true,
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(title: Text('${widget.subject} quiz')),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Card(
+              margin: const EdgeInsets.all(16),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      result.passed
+                          ? Icons.emoji_events_rounded
+                          : Icons.school_rounded,
+                      size: 44,
+                      color: result.passed
+                          ? const Color(0xFFE0A21A)
+                          : Colors.black38,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Score: ${result.correct}/${result.total}',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      result.message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Day ${gs.time.day} · ${gs.time.clockLabel} · '
+                      'Energy ${gs.player.energy}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ElevatedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       );
     }
     final q = questions[_index % questions.length];
@@ -2457,6 +2272,14 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
+                    'Question ${_index + 1} of ${questions.length}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
                     q['q'] as String,
                     style: const TextStyle(
                       fontSize: 20,
@@ -2469,25 +2292,25 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
                       padding: const EdgeInsets.only(top: 8),
                       child: ElevatedButton(
                         onPressed: () {
-                          final correct = i == (q['answer'] as int);
-                          if (correct) {
-                            gs.attendClass(present: true);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Correct! Education +2'),
-                              ),
+                          var score = _score;
+                          if (i == (q['answer'] as int)) score++;
+                          if (_index + 1 >= questions.length) {
+                            // Grade the whole quiz once: 15 minutes, one
+                            // score-scaled reward, no per-question classes.
+                            final graded = gs.finishQuiz(
+                              correct: score,
+                              total: questions.length,
                             );
+                            setState(() {
+                              _score = score;
+                              _index++;
+                              _result = graded;
+                            });
                           } else {
-                            gs.applyActivity('class');
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Not quite. Try again!'),
-                              ),
-                            );
-                          }
-                          setState(() => _index++);
-                          if (_index >= questions.length) {
-                            Navigator.of(context).pop();
+                            setState(() {
+                              _score = score;
+                              _index++;
+                            });
                           }
                         },
                         child: Text(choices[i]),
@@ -2523,10 +2346,10 @@ class _CafeGameState extends ConsumerState<CafeGameScreen> {
     if (_customer >= _total) {
       final ratio = _score / _total;
       final pay = ratio >= 0.9
-          ? 300
+          ? 320
           : ratio >= 0.6
-          ? 270
-          : 210;
+          ? 280
+          : 240;
       return Scaffold(
         extendBody: true,
         extendBodyBehindAppBar: true,
@@ -2556,6 +2379,13 @@ class _CafeGameState extends ConsumerState<CafeGameScreen> {
                       gs.applyActivity('work');
                       gs.addMoney(pay);
                       gs.setFlag('worked_first_shift');
+                      if (gs.quests['cafe_part_time']?.status ==
+                          QuestStatus.available) {
+                        gs.startQuest('cafe_part_time');
+                      }
+                      gs.completeObjective('cafe_part_time', 'meet_lena');
+                      gs.completeObjective('cafe_part_time', 'lunch_rush');
+                      gs.completeObjective('cafe_part_time', 'close_shift');
                       AudioService().coins();
                       Navigator.of(context).pop();
                     },

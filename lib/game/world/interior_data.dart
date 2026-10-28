@@ -47,6 +47,10 @@ class InteriorProp {
   /// When true, interacting opens the dining-table scene.
   final bool diningScene;
 
+  /// When true, interacting opens this building's full-screen venue scene
+  /// (the hand-painted "step inside" experience for non-home locations).
+  final bool venueScene;
+
   /// Optional sprite art for the prop (asset file under assets/images/,
   /// e.g. 'home_bed.png'). Loaded in the background by [InteriorWorld];
   /// the flat color rect is the fallback until it arrives. When art is
@@ -75,6 +79,7 @@ class InteriorProp {
     this.tvScene = false,
     this.cookScene = false,
     this.diningScene = false,
+    this.venueScene = false,
     this.art,
     this.artTurns = 0,
   });
@@ -298,8 +303,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 130,
             color: 0xFFB45F06,
             label: 'TEACHER',
-            interactLabel: 'Open School menu',
+            interactLabel: 'Step into class',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 200,
@@ -391,8 +397,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 170,
             color: 0xFFE06666,
             label: 'VENDOR',
-            interactLabel: 'Open Plaza menu',
+            interactLabel: 'Step into the plaza',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 1090,
@@ -444,8 +451,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 130,
             color: 0xFFF1F1F1,
             label: 'ALTAR',
-            interactLabel: 'Open Church menu',
+            interactLabel: 'Step into the church',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 120,
@@ -507,8 +515,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 210,
             color: 0xFF666666,
             label: 'GYM',
-            interactLabel: 'Open Park menu',
+            interactLabel: 'Step into the park',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 900,
@@ -580,8 +589,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 160,
             color: 0xFFB45F06,
             label: 'COUNTER',
-            interactLabel: 'Open Café menu',
+            interactLabel: 'Step into the café',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 240,
@@ -633,8 +643,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 170,
             color: 0xFF5B7FA6,
             label: 'TELLER',
-            interactLabel: 'Open Bank menu',
+            interactLabel: 'Step into the bank',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 200,
@@ -686,8 +697,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 220,
             color: 0xFFE69138,
             label: 'FOOD CRT',
-            interactLabel: 'Open Mall menu',
+            interactLabel: 'Step into the mall',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 140,
@@ -738,8 +750,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 220,
             color: 0xFFB45F06,
             label: 'WORKBENCH',
-            interactLabel: 'Open Repair menu',
+            interactLabel: 'Step into the garage',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 180,
@@ -781,8 +794,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFF2E7D5B,
             label: 'COUNTER',
-            interactLabel: 'Open Book Store menu',
+            interactLabel: 'Step into the book store',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 150,
@@ -824,8 +838,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFFE69138,
             label: 'CHECKOUT',
-            interactLabel: 'Open Super Market menu',
+            interactLabel: 'Step into the supermarket',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 150,
@@ -867,8 +882,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFFB45F06,
             label: 'COUNTER',
-            interactLabel: 'Open Pizza Hut menu',
+            interactLabel: 'Step into Pizza Hut',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 200,
@@ -910,8 +926,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFF6FA8DC,
             label: 'RECEPTION',
-            interactLabel: 'Open Hospital menu',
+            interactLabel: 'Step into the hospital',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 200,
@@ -953,8 +970,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 180,
             color: 0xFFB45F06,
             label: 'COUNTER',
-            interactLabel: 'Open Restaurant menu',
+            interactLabel: 'Step into the restaurant',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 240,
@@ -996,8 +1014,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFF8E7CC3,
             label: 'COUNTER',
-            interactLabel: 'Open Laundry menu',
+            interactLabel: 'Step into the laundry',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 200,
@@ -1039,8 +1058,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFF1D3557,
             label: 'DESK',
-            interactLabel: 'Open Police menu',
+            interactLabel: 'Step into the station',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 200,
@@ -1082,8 +1102,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFF444444,
             label: 'COUNTER',
-            interactLabel: 'Open Computer menu',
+            interactLabel: 'Step into the computer center',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 180,
@@ -1125,8 +1146,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 220,
             color: 0xFFE06666,
             label: 'TICKETS',
-            interactLabel: 'Open Amusement menu',
+            interactLabel: 'Step into the amusement park',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 150,
@@ -1168,8 +1190,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 220,
             color: 0xFF4A86E8,
             label: 'LIFEGUARD',
-            interactLabel: 'Open Beach menu',
+            interactLabel: 'Step onto the beach',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 200,
@@ -1211,8 +1234,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFF8C6239,
             label: 'PIER',
-            interactLabel: 'Open Fishing menu',
+            interactLabel: 'Step onto the pier',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 200,
@@ -1254,8 +1278,9 @@ InteriorLayout buildInterior(String locationId) {
             h: 200,
             color: 0xFF7E57C2,
             label: 'FRONT DESK',
-            interactLabel: 'Open Hotel menu',
+            interactLabel: 'Step into the lobby',
             opensMenu: true,
+            venueScene: true,
           ),
           InteriorProp(
             x: 220,

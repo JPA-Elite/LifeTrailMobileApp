@@ -123,6 +123,10 @@ class _RelaxSceneScreenState extends ConsumerState<RelaxSceneScreen>
         return;
       }
       final next = gs.addHappiness(1);
+      // Resting is not free time: one in-game minute passes and the quiet
+      // restores a little energy while the mood meter climbs.
+      gs.advanceMinutes(1);
+      gs.changeEnergy(1);
       if (!mounted) return;
       setState(() {
         _gained++;

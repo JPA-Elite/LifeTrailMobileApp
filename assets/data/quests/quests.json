@@ -52,6 +52,120 @@
         {"id": "talk_ben_work", "description": "Talk to Ben at the café after 17:00"},
         {"id": "spar_ben", "description": "Spar with Ben at the park"}
       ]
+    },
+    {
+      "id": "cafe_part_time",
+      "title": "First Shift at The Roast",
+      "description": "Lena needs a reliable hand behind the counter. Prove you can handle the lunch rush and earn your first paycheck.",
+      "npcId": "lena",
+      "rewardMoney": 300,
+      "rewardRelationship": 4,
+      "rewardFlag": "cafe_employee",
+      "status": "locked",
+      "requiresDay": 3,
+      "requiresCharm": 8,
+      "objectives": [
+        {"id": "meet_lena", "description": "Meet Lena at the café during open hours"},
+        {"id": "lunch_rush", "description": "Work the lunch rush (11:00-14:00)"},
+        {"id": "close_shift", "description": "Finish your closing shift and collect your pay"}
+      ]
+    },
+    {
+      "id": "study_group",
+      "title": "Midterm Study Group",
+      "description": "The library study group is meeting to prep for midterms. Join them to boost your education and make new friends.",
+      "npcId": "maria",
+      "rewardMoney": 0,
+      "rewardRelationship": 3,
+      "rewardFlag": "study_group_done",
+      "status": "locked",
+      "requiresDay": 4,
+      "requiresIntelligence": 11,
+      "objectives": [
+        {"id": "go_library", "description": "Head to the library after school"},
+        {"id": "join_group", "description": "Join the study group session"},
+        {"id": "ace_quiz", "description": "Score well on the midterm practice quiz"}
+      ]
+    },
+    {
+      "id": "maria_birthday",
+      "title": "A Gift for Maria",
+      "description": "Maria's birthday is coming up. Find a thoughtful gift she'll actually like — not something generic from the supermarket.",
+      "npcId": "maria",
+      "rewardMoney": 0,
+      "rewardRelationship": 7,
+      "rewardFlag": "maria_birthday_done",
+      "status": "locked",
+      "requiresFlags": ["completed_wallet_quest"],
+      "requiresRelationship": 12,
+      "requiresCharm": 10,
+      "objectives": [
+        {"id": "pick_gift", "description": "Pick out a meaningful gift at the mall"},
+        {"id": "wrap_gift", "description": "Wrap it nicely at home"},
+        {"id": "give_gift", "description": "Give the gift to Maria on her birthday"}
+      ]
+    },
+    {
+      "id": "lost_cat",
+      "title": "Milo the Missing Cat",
+      "description": "Mrs. Delgado's cat Milo vanished near the park. The whole block is looking — can you track him down?",
+      "npcId": "ben",
+      "rewardMoney": 100,
+      "rewardRelationship": 3,
+      "rewardFlag": "lost_cat_done",
+      "status": "locked",
+      "requiresDay": 5,
+      "objectives": [
+        {"id": "talk_mrs_delgado", "description": "Talk to Mrs. Delgado at her home"},
+        {"id": "search_park", "description": "Search the park for Milo"},
+        {"id": "return_cat", "description": "Return Milo to Mrs. Delgado"}
+      ]
+    },
+    {
+      "id": "cooking_lesson",
+      "title": "Kitchen Basics",
+      "description": "You keep burning toast. Learn to cook a proper meal so you can take care of yourself — and impress someone special.",
+      "npcId": "maria",
+      "rewardMoney": 0,
+      "rewardRelationship": 4,
+      "rewardFlag": "cooking_lesson_done",
+      "status": "locked",
+      "requiresDay": 6,
+      "objectives": [
+        {"id": "buy_ingredients", "description": "Buy ingredients at the supermarket"},
+        {"id": "cook_meal", "description": "Cook a meal at home"},
+        {"id": "share_meal", "description": "Share the meal with Maria"}
+      ]
+    },
+    {
+      "id": "debt_repayment",
+      "title": "The Rent Comes Due",
+      "description": "Your room's rent is overdue. The landlord gave you until the end of day 7 to pay up or find another place to sleep.",
+      "npcId": null,
+      "rewardMoney": 0,
+      "rewardRelationship": 0,
+      "rewardFlag": "debt_paid",
+      "status": "available",
+      "requiresDay": 1,
+      "objectives": [
+        {"id": "earn_money", "description": "Earn money before day 7 ends"},
+        {"id": "pay_landlord", "description": "Pay the landlord what you owe"}
+      ]
+    },
+    {
+      "id": "weekend_hike",
+      "title": "Weekend Reset",
+      "description": "You've been grinding all week. Take Saturday off — visit the beach or amusement park to recharge your happiness.",
+      "npcId": null,
+      "rewardMoney": 0,
+      "rewardRelationship": 0,
+      "rewardFlag": "weekend_reset_done",
+      "status": "locked",
+      "requiresDay": 6,
+      "objectives": [
+        {"id": "visit_beach_or_park", "description": "Spend time at the beach or amusement park"},
+        {"id": "unwind", "description": "Let your happiness recover"}
+      ]
     }
   ]
 }

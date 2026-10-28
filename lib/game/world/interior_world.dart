@@ -560,7 +560,8 @@ class InteriorPropBlock extends RectangleComponent
         Wardrobe,
         Television,
         CookingStation,
-        DiningTable {
+        DiningTable,
+        VenueScenario {
   final InteriorProp prop;
   final String locationId;
 
@@ -620,6 +621,12 @@ class InteriorPropBlock extends RectangleComponent
 
   @override
   bool get opensDiningScene => prop.diningScene;
+
+  @override
+  bool get opensVenueScene => prop.venueScene;
+
+  @override
+  String get venueId => locationId;
 
   @override
   String get interactId =>

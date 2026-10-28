@@ -75,6 +75,17 @@ abstract interface class WindowView {
   bool get opensWindowView;
 }
 
+/// Opt-in marker for the main prop of a town building: opens that building's
+/// full-screen venue scenario (hand-painted art, copy and real actions).
+/// Home props use the dedicated sofa/TV/kitchen/dining scenes instead.
+abstract interface class VenueScenario {
+  /// True when tapping this prop opens the venue scene.
+  bool get opensVenueScene;
+
+  /// Town location id used to look up the [Venue] definition.
+  String get venueId;
+}
+
 class LifeInteractContext {
   final void Function(String message) showMessage;
 

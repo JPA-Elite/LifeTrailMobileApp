@@ -79,8 +79,39 @@ class GameState extends ChangeNotifier {
 
   // Summertime Saga chapter debt/progression hook
   int get debtDueDay => 7;
-  bool get isDebtOverdue =>
-      time.day > debtDueDay && (flags['debt_paid'] ?? 0) == 0;
+
+  /// Rent owed to the landlord. Payable at the bank with [payRent].
+  static const int rentCost = 500;
+
+  bool get rentPaid => hasFlag('debt_paid');
+
+  bool get isDebtOverdue => time.day > debtDueDay && !rentPaid;
+
+  /// Pays the landlord and clears the overdue-rent penalty.
+  ///
+  /// This is the only way out of [isDebtOverdue]; the old build showed a HUD
+  /// warning with no remedy at all.
+  MoneyResult payRent() {
+    if (rentPaid) {
+      return const MoneyResult(false, 'Your rent is already settled.');
+    }
+    final check = removeMoney(rentCost);
+    if (!check.ok) {
+      return const MoneyResult(
+        false,
+        'You need ₱$rentCost to settle the rent.',
+      );
+    }
+    flags['debt_paid'] = 1;
+    if (quests['debt_repayment']?.status == QuestStatus.available) {
+      startQuest('debt_repayment');
+    }
+    completeObjective('debt_repayment', 'earn_money');
+    completeObjective('debt_repayment', 'pay_landlord');
+    addHappiness(5);
+    notifyListeners();
+    return const MoneyResult(true, 'Rent paid. You can sleep easy again.');
+  }
 
   /// Promotes every `locked` quest whose gates (flags / relationship /
   /// day / stats) are now satisfied to `available`.
@@ -107,8 +138,25 @@ class GameState extends ChangeNotifier {
 
   MoneyResult addMoney(int amount) {
     player = player.copyWith(money: player.money + amount);
+    _syncMoneyObjectives();
     notifyListeners();
     return const MoneyResult(true);
+  }
+
+  bool _syncingMoneyObjectives = false;
+
+  /// The rent quest's first objective ("earn money") is satisfied as soon as
+  /// the player actually has enough cash on hand. The re-entrancy guard
+  /// matters because completing an objective can itself award money.
+  void _syncMoneyObjectives() {
+    if (_syncingMoneyObjectives) return;
+    if (player.money < rentCost) return;
+    final q = quests['debt_repayment'];
+    if (q == null || q.status != QuestStatus.active) return;
+    if (q.objectives.any((o) => o.id == 'earn_money' && o.done)) return;
+    _syncingMoneyObjectives = true;
+    completeObjective('debt_repayment', 'earn_money');
+    _syncingMoneyObjectives = false;
   }
 
   MoneyResult removeMoney(int amount) {
@@ -172,6 +220,14 @@ class GameState extends ChangeNotifier {
         .toInt();
     if (next != player.happiness) {
       player = player.copyWith(happiness: next);
+      // "Weekend Reset" closes its second objective once the player is
+      // genuinely happy again (80+).
+      final hike = quests['weekend_hike'];
+      if (hike != null &&
+          hike.status == QuestStatus.active &&
+          next >= 80) {
+        completeObjective('weekend_hike', 'unwind');
+      }
       _checkQuestUnlocks();
       notifyListeners();
     }
@@ -207,6 +263,14 @@ class GameState extends ChangeNotifier {
 
   void addStrength(int delta) {
     player = player.copyWith(strength: player.strength + delta);
+    _checkQuestUnlocks();
+    notifyListeners();
+  }
+
+  /// Raises education (class attendance and study venues). Kept alongside
+  /// the other stat setters so quest gates are re-checked consistently.
+  void addEducation(int delta) {
+    player = player.copyWith(education: player.education + delta);
     _checkQuestUnlocks();
     notifyListeners();
   }
@@ -250,10 +314,10 @@ class GameState extends ChangeNotifier {
       LocationHours.isOpen(locationId, time.weekdayLabel, time.minutes);
 
   // --- Day scenario / building-entry time cost ---------------------------
-  // Every building entry costs travel + visit time. 90 min per entry, so
-  // 4 entries = 360 min = 6 hours. Time/date (HUD clock) advances and the
-  // town + interior visuals follow the new DayPeriod.
-  static const int minutesPerBuildingEntry = 90;
+  // Walking up to a door and stepping in costs a short 20 minutes. The old
+  // 90-minute charge double-counted the time already spent on each venue
+  // action, so three errands swallowed an entire day.
+  static const int minutesPerBuildingEntry = 20;
 
   int get buildingEntryCount => flags['building_entries'] ?? 0;
 
@@ -268,11 +332,20 @@ class GameState extends ChangeNotifier {
 
   bool canEnterBuilding(String locationId) {
     if (locationId == 'home') return true;
-    return !isNightTime;
+    // Real opening hours, not a blanket night lock: 24 h venues (hospital,
+    // police, hotel, beach, fishing) stay usable after dark.
+    return isLocationOpen(locationId);
   }
 
-  String buildingBlockedMessage(String locationId) =>
-      'It\'s night time (${time.clockLabel}). $locationId is closed. Go home and sleep until morning.';
+  String buildingBlockedMessage(String locationId) {
+    final title = LocationHours.name(locationId);
+    if (LocationHours.isAlwaysOpen(locationId)) {
+      return '$title is closed right now (${time.clockLabel}).';
+    }
+    return '$title is closed. Hours: ${LocationHours.label(locationId)}. '
+        'It is ${time.clockLabel} ${time.periodLabel.toLowerCase()} — '
+        'come back when it opens.';
+  }
 
   void eatMeal() => applyActivity('eat');
 
@@ -300,16 +373,60 @@ class GameState extends ChangeNotifier {
       attendancePresent: player.attendancePresent + (present ? 1 : 0),
     );
     if (present) {
+      // The `class` activity already grants +2 education and +1 intelligence.
+      // Adding them again here used to double every lesson's payout.
       applyActivity('class');
-      player = player.copyWith(
-        education: player.education + 2,
-        intelligence: player.intelligence + 1,
-      );
     } else {
       advanceMinutes(Activities.of('class').minutes);
       flags['school_warning'] = (flags['school_warning'] ?? 0) + 1;
     }
     notifyListeners();
+  }
+
+  /// Grades a finished practice quiz in a single step.
+  ///
+  /// The old screen called [attendClass] once per answer, so a five-question
+  /// quiz cost 7.5 hours and marked five attendances. This charges one short
+  /// 15-minute session and scales the reward with the score.
+  QuizResult finishQuiz({required int correct, required int total}) {
+    final cfg = Activities.of('quiz');
+    if (!EnergySystem.canDo(player.energy, cfg.energyDelta)) {
+      return QuizResult(
+        ok: false,
+        correct: correct,
+        total: total,
+        passed: false,
+        message: 'You are too tired to focus on a quiz.',
+      );
+    }
+    advanceMinutes(cfg.minutes);
+    final ratio = total <= 0 ? 0.0 : correct / total;
+    final passed = ratio >= 0.5;
+    final strong = ratio >= 0.8;
+    player = player.copyWith(
+      energy: player.energy + cfg.energyDelta,
+      education: player.education + (strong ? 2 : (passed ? 1 : 0)),
+      intelligence: player.intelligence + (strong ? 2 : (passed ? 1 : 0)),
+      happiness: player.happiness + (passed ? 1 : 0),
+      money: player.money + (strong ? 50 : 0),
+    );
+    if (strong) {
+      completeObjective('study_group', 'ace_quiz');
+    }
+    _checkQuestUnlocks();
+    notifyListeners();
+    final reward = strong
+        ? 'Excellent! Education +2, Intelligence +2, Happiness +1, ₱50.'
+        : passed
+        ? 'Passed. Education +1, Intelligence +1, Happiness +1.'
+        : 'You scraped through. Study more and try again.';
+    return QuizResult(
+      ok: true,
+      correct: correct,
+      total: total,
+      passed: passed,
+      message: reward,
+    );
   }
 
   void adjustRelationship(String npcId, int delta) {
@@ -508,9 +625,13 @@ class GameState extends ChangeNotifier {
     final nextDay = time.day + 1;
     final wake = GameTime(day: nextDay, minutes: 7 * 60);
     time = wake;
+    // Sleeping with the rent unpaid is rough: the landlord is knocking and
+    // the worry follows you to bed.
+    final overdue = isDebtOverdue;
     player = player.copyWith(
       energy: PlayerModel.energyMax,
-      health: player.health + 5,
+      health: player.health + (overdue ? -2 : 5),
+      happiness: player.happiness + (overdue ? -3 : 2),
     );
     weather = WeatherKind.sunny;
     // Summertime Saga: chapter increments, attendance resets weekly
@@ -540,6 +661,26 @@ class GameState extends ChangeNotifier {
   static const int atmPinLength = 6;
 
   int get bankBalance => flags['bank_balance'] ?? 2000;
+
+  /// Pocket money the bank hands out. Once per in-game day so it cannot be
+  /// farmed by reopening the bank menu.
+  static const int allowanceAmount = 200;
+
+  MoneyResult withdrawAllowance() {
+    if ((flags['allowance_day'] ?? -1) == time.day) {
+      return const MoneyResult(
+        false,
+        'You already collected today\'s allowance. Come back tomorrow.',
+      );
+    }
+    flags['allowance_day'] = time.day;
+    addMoney(allowanceAmount);
+    advanceMinutes(5);
+    return const MoneyResult(
+      true,
+      'Allowance collected: +₱$allowanceAmount.',
+    );
+  }
 
   String get bankPesoBalance => '₱$bankBalance';
 
@@ -584,4 +725,21 @@ class GameState extends ChangeNotifier {
     notifyListeners();
     return const MoneyResult(true);
   }
+}
+
+/// Outcome of grading a practice quiz in one step.
+class QuizResult {
+  const QuizResult({
+    required this.ok,
+    required this.correct,
+    required this.total,
+    required this.passed,
+    required this.message,
+  });
+
+  final bool ok;
+  final int correct;
+  final int total;
+  final bool passed;
+  final String message;
 }
